@@ -1,4 +1,4 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import { Download, FileText, Printer, CheckCircle2, AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
 import { paperService } from "../services/api";
 import { translations, Language } from "../services/translations";
@@ -73,81 +73,83 @@ export const ExportScreen: React.FC<ExportScreenProps> = ({
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 pb-20">
+    <div className="max-w-5xl mx-auto space-y-6 pb-20 w-full min-w-0 overflow-hidden">
       {/* Header & Export Actions */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentTab("editor")}
-              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors cursor-pointer"
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Download className="w-5 h-5 text-blue-600" />
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 flex items-center gap-2 truncate">
+              <Download className="w-5 h-5 text-blue-600 shrink-0" />
               {t.exportHeader}
             </h2>
           </div>
-          <p className="text-xs text-slate-500 mt-1 ml-8">
+          <p className="text-xs text-slate-500 mt-1 sm:ml-8">
             {t.exportHeaderDesc}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 cursor-pointer">
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 w-full lg:w-auto">
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 cursor-pointer justify-center sm:justify-start">
             <input
               type="checkbox"
               checked={includeAnswerKey}
               onChange={(e) => setIncludeAnswerKey(e.target.checked)}
               className="w-4 h-4 text-blue-600 rounded-sm"
             />
-            {t.includeAnswerKeyInDocx}
+            <span>{t.includeAnswerKeyInDocx}</span>
           </label>
 
-          <button
-            onClick={handleDownloadPdf}
-            disabled={isExportingPdf || isExportingDocx}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-          >
-            {isExportingPdf ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                {t.downloadingPdf}
-              </>
-            ) : (
-              <>
-                <FileText className="w-4 h-4" />
-                {t.downloadPdfBtn}
-              </>
-            )}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleDownloadPdf}
+              disabled={isExportingPdf || isExportingDocx}
+              className="flex-1 sm:flex-none justify-center inline-flex items-center gap-1.5 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isExportingPdf ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {t.downloadingPdf}
+                </>
+              ) : (
+                <>
+                  <FileText className="w-4 h-4" />
+                  {t.downloadPdfBtn}
+                </>
+              )}
+            </button>
 
-          <button
-            onClick={handleDownloadDocx}
-            disabled={isExportingPdf || isExportingDocx}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-          >
-            {isExportingDocx ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                {t.downloadingDocx}
-              </>
-            ) : (
-              <>
-                <Download className="w-4 h-4" />
-                {t.downloadDocxBtn}
-              </>
-            )}
-          </button>
+            <button
+              onClick={handleDownloadDocx}
+              disabled={isExportingPdf || isExportingDocx}
+              className="flex-1 sm:flex-none justify-center inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isExportingDocx ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {t.downloadingDocx}
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  {t.downloadDocxBtn}
+                </>
+              )}
+            </button>
 
-          <button
-            onClick={handlePrint}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-          >
-            <Printer className="w-4 h-4" />
-            {t.printBtn}
-          </button>
+            <button
+              onClick={handlePrint}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              <span className="hidden sm:inline">{t.printBtn}</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -167,13 +169,13 @@ export const ExportScreen: React.FC<ExportScreenProps> = ({
 
       {/* Live Print Preview Iframe */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center text-xs">
+        <div className="px-4 sm:px-6 py-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center text-xs">
           <span className="font-bold text-slate-700">{t.liveA4Preview}</span>
-          <span className="text-slate-400">{t.printStandardsHint}</span>
+          <span className="text-slate-400 hidden sm:inline">{t.printStandardsHint}</span>
         </div>
 
-        <div className="p-4 sm:p-8 bg-slate-100 flex justify-center">
-          <div className="w-full max-w-[210mm] bg-white shadow-xl rounded-xs overflow-hidden border border-slate-300">
+        <div className="p-2 sm:p-8 bg-slate-100 flex justify-center overflow-x-auto w-full">
+          <div className="w-full max-w-[210mm] min-w-[320px] sm:min-w-[600px] md:min-w-[750px] bg-white shadow-xl rounded-xs overflow-hidden border border-slate-300">
             <iframe
               id="preview-frame"
               src={paperService.getRenderUrl(paperId)}

@@ -1,4 +1,4 @@
-﻿import re
+import re
 from typing import Dict, Any, List, Tuple
 
 PROHIBITED_POETRY_PATTERNS = [
@@ -164,6 +164,12 @@ def validate_generated_or_edited_paper(paper_data: Dict[str, Any]) -> Dict[str, 
     if "Set A" in paper_str or "Set B" in paper_str or "Set C" in paper_str or "सेट अ" in paper_str:
         errors.append("बहु-सेट (Set A, Set B, Set C) वर्जित हैं। केवल एक प्रश्नपत्रिका अनुमत है।")
         
+    # Check for duplicate questions across all sections
+    from app.services.question_uniqueness import validate_paper_question_uniqueness
+    uniqueness_errors = validate_paper_question_uniqueness(paper_data)
+    if uniqueness_errors:
+        errors.extend(uniqueness_errors)
+
     return {
         "is_valid": len(errors) == 0,
         "configured_total": configured_total,

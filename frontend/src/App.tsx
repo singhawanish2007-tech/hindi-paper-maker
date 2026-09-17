@@ -1,4 +1,4 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import { Navbar } from "./components/Navbar";
 import { Dashboard } from "./pages/Dashboard";
 import { TextbookUpload } from "./pages/TextbookUpload";
@@ -14,7 +14,7 @@ export const App: React.FC = () => {
   const [lang, setLang] = useState<Language>("hi");
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col w-full min-w-0 overflow-x-hidden">
       <Navbar
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
@@ -81,8 +81,8 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
-        <p>
+      <footer className="bg-white border-t border-slate-200 py-4 px-4 text-center text-xs text-slate-500">
+        <p className="break-words">
           महाराष्ट्र राज्य माध्यमिक व उच्च माध्यमिक शिक्षण मंडळ • HINDI PAPER MAKER © 2026 • Trinity High School & Junior College
         </p>
       </footer>

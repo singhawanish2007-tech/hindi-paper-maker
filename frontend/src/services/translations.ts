@@ -1,4 +1,4 @@
-﻿export type Language = "hi" | "en";
+export type Language = "hi" | "en";
 
 export const translations = {
   hi: {
@@ -126,7 +126,13 @@ export const translations = {
     printStandardsHint: "10mm मार्जिन • देवनागरी फ़ॉन्ट • तालिका-आधारित लेआउट",
     downloadingPdf: "PDF तैयार हो रही है...",
     downloadingDocx: "Word फ़ाइल तैयार हो रही है...",
-    exportSuccess: "फ़ाइल सफलतापूर्वक डाउनलोड हुई!"
+    exportSuccess: "फ़ाइल सफलतापूर्वक डाउनलोड हुई!",
+    regenerateQuestionBtn: "प्रश्न पुनः उत्पन्न करें",
+    regeneratingQuestion: "पुनः उत्पन्न हो रहा है...",
+    duplicateWarningBanner: "पुनरावृत्ति चेतावनी : इस प्रश्नपत्रिका में दोहराए गए प्रश्न पाए गए हैं। कृपया चिह्नित प्रश्नों को पुनः उत्पन्न करें या संपादित करें।",
+    duplicateQuestionBadge: "दोहराया गया प्रश्न",
+    mobileMenu: "मेनू",
+    closeMenu: "बंद करें"
   },
   en: {
     // Nav
@@ -253,6 +259,12 @@ export const translations = {
     printStandardsHint: "10mm Margins • Devanagari Fonts • Table-based Layout",
     downloadingPdf: "Generating PDF...",
     downloadingDocx: "Generating Word DOCX...",
-    exportSuccess: "File downloaded successfully!"
+    exportSuccess: "File downloaded successfully!",
+    regenerateQuestionBtn: "Regenerate Question",
+    regeneratingQuestion: "Regenerating...",
+    duplicateWarningBanner: "Duplicate Warning: Repeated questions detected in this paper. Please regenerate or edit the flagged questions.",
+    duplicateQuestionBadge: "Duplicate Question",
+    mobileMenu: "Menu",
+    closeMenu: "Close"
   }
 };

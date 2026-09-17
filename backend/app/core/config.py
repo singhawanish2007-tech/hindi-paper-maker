@@ -7,15 +7,21 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api"
     
+    # Environment detection
+    IS_VERCEL: bool = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
-    STORAGE_DIR: Path = BASE_DIR / "storage"
+    STORAGE_DIR: Path = Path("/tmp/storage") if bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")) else BASE_DIR / "storage"
     TEXTBOOKS_DIR: Path = STORAGE_DIR / "textbooks"
     EXPORTS_DIR: Path = STORAGE_DIR / "exports"
     ASSETS_DIR: Path = STORAGE_DIR / "assets"
     
     # Database
-    DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR}/hindi_paper_maker.db")
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL",
+        "sqlite:////tmp/hindi_paper_maker.db" if bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")) else f"sqlite:///{Path(__file__).resolve().parent.parent.parent}/hindi_paper_maker.db"
+    )
     
     # AI Engine
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")

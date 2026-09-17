@@ -67,7 +67,7 @@ def health_endpoint():
 @app.get("/api/health")
 def health_check():
     return {
-        "status": "healthy",
+        "status": "ok",
         "project": settings.PROJECT_NAME,
         "version": settings.VERSION,
         "gemini_configured": bool(settings.GEMINI_API_KEY)
