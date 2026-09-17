@@ -1,14 +1,17 @@
 ﻿services:
   - type: web
-    name: hindi-paper-maker
+    name: hindi-paper-maker-backend
     env: docker
     dockerfilePath: Dockerfile
     plan: free
     region: oregon
+    healthCheckPath: /health
     envVars:
       - key: HOST
         value: 0.0.0.0
-      - key: PORT
-        value: 8000
       - key: GEMINI_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
         sync: false

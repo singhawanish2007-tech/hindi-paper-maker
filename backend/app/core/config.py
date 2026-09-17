@@ -1,4 +1,4 @@
-﻿import os
+import os
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
@@ -15,10 +15,13 @@ class Settings(BaseSettings):
     ASSETS_DIR: Path = STORAGE_DIR / "assets"
     
     # Database
-    DATABASE_URL: str = f"sqlite:///{BASE_DIR}/hindi_paper_maker.db"
+    DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR}/hindi_paper_maker.db")
     
     # AI Engine
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    
+    # Frontend URL for CORS in production
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "")
     
     # File Limits (100 MB)
     MAX_FILE_SIZE: int = 100 * 1024 * 1024

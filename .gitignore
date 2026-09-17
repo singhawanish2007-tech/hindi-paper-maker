@@ -25,12 +25,13 @@ yarn-error.log*
 
 # Environment and secrets
 .env
+.env.*
 .env.local
 .env.*.local
 *.env
 !.env.example
-backend/.env
 !backend/.env.example
+!frontend/.env.example
 
 # SQLite Database
 *.db
@@ -39,6 +40,8 @@ backend/.env
 backend/hindi_paper_maker.db
 
 # Storage artifacts (generated exports and uploaded textbooks)
+uploads/
+generated/
 backend/storage/exports/*
 !backend/storage/exports/.gitkeep
 backend/storage/textbooks/*

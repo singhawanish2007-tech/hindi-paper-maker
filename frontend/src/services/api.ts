@@ -1,4 +1,4 @@
-﻿import axios from "axios";
+import axios from "axios";
 import {
   Textbook,
   Chapter,
@@ -8,8 +8,12 @@ import {
   AnswerKeyData
 } from "../types";
 
+// Read backend base URL from environment variable (for production deployment on Vercel)
+const RAW_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) || "";
+export const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "");
+
 const api = axios.create({
-  baseURL: "/api"
+  baseURL: API_BASE_URL ? `${API_BASE_URL}/api` : "/api"
 });
 
 export const textbookService = {
@@ -100,14 +104,14 @@ export const paperService = {
   },
 
   getRenderUrl(id: number): string {
-    return `/api/papers/${id}/render`;
+    return `${API_BASE_URL}/api/papers/${id}/render`;
   },
 
   /**
    * Downloads A4 PDF using a real POST request, reads as Blob, and triggers browser download.
    */
   async downloadPdf(id: number, customFilename?: string): Promise<void> {
-    const url = `/api/papers/${id}/export/pdf`;
+    const url = `${API_BASE_URL}/api/papers/${id}/export/pdf`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -149,7 +153,7 @@ export const paperService = {
    * Downloads Word DOCX using a real POST request with include_answer_key, reads as Blob, and triggers browser download.
    */
   async downloadDocx(id: number, includeAnswerKey = false, customFilename?: string): Promise<void> {
-    const url = `/api/papers/${id}/export/word?include_answer_key=${includeAnswerKey}`;
+    const url = `${API_BASE_URL}/api/papers/${id}/export/word?include_answer_key=${includeAnswerKey}`;
     const response = await fetch(url, {
       method: "POST",
       headers: {

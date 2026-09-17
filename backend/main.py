@@ -23,13 +23,33 @@ app = FastAPI(
 )
 
 # CORS configuration
+frontend_url = os.environ.get("FRONTEND_URL", "").strip() or settings.FRONTEND_URL.strip()
+allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+if frontend_url and frontend_url != "*":
+    for u in frontend_url.split(","):
+        if u.strip():
+            allowed_origins.append(u.strip().rstrip("/"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins for local and deployed use
+    allow_origins=["*"] if (not frontend_url or frontend_url == "*") else allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Ensure storage directories exist
+settings.STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+settings.TEXTBOOKS_DIR.mkdir(parents=True, exist_ok=True)
+settings.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+settings.ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mount storage directory for static assets (logo, etc.)
 app.mount("/storage", StaticFiles(directory=str(settings.STORAGE_DIR)), name="storage")
@@ -38,6 +58,11 @@ app.mount("/storage", StaticFiles(directory=str(settings.STORAGE_DIR)), name="st
 app.include_router(textbooks_router, prefix=settings.API_V1_STR)
 app.include_router(papers_router, prefix=settings.API_V1_STR)
 app.include_router(blueprints_router, prefix=settings.API_V1_STR)
+
+@app.get("/health")
+def health_endpoint():
+    """Render/Cloud production health check."""
+    return {"status": "ok"}
 
 @app.get("/api/health")
 def health_check():
