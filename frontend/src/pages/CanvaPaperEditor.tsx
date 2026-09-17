@@ -11,12 +11,14 @@ import {
   Download,
   CheckCircle2,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  FileText
 } from "lucide-react";
 import { PaperData, QuestionItem } from "../types";
 import { paperService } from "../services/api";
 import { MarksValidatorBadge } from "../components/MarksValidatorBadge";
 import { translations, Language } from "../services/translations";
+import { FormattedText } from "../components/FormattedText";
 
 interface CanvaPaperEditorProps {
   paperId: number | null;
@@ -36,6 +38,7 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [regeneratingKey, setRegeneratingKey] = useState<string | null>(null);
+  const [regeneratingSubKey, setRegeneratingSubKey] = useState<string | null>(null);
 
   const t = translations[lang] || translations.hi;
 
@@ -263,6 +266,185 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
     updateState({ ...paperData, sections: newSections });
   };
 
+  const handleRegenerateSubQuestion = async (sIdx: number, qIdx: number, subIdx: number) => {
+    if (!paperId) return;
+    const key = `${sIdx}-${qIdx}-${subIdx}`;
+    setRegeneratingSubKey(key);
+    try {
+      const res = await paperService.regenerateSubQuestion(paperId, sIdx, qIdx, subIdx);
+      if (res.paper_data) {
+        updateState(res.paper_data);
+        setSaveMessage(
+          lang === "hi"
+            ? "उपप्रश्न सफलतापूर्वक पुनः उत्पन्न हुआ!"
+            : "Subquestion regenerated successfully!"
+        );
+        setTimeout(() => setSaveMessage(null), 3000);
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.detail || err.message || "Failed to regenerate subquestion");
+    } finally {
+      setRegeneratingSubKey(null);
+    }
+  };
+
+  const handleSubQuestionTextChange = (sIdx: number, qIdx: number, subIdx: number, text: string) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const targetSub = newSections[sIdx].questions[qIdx].sub_questions?.[subIdx];
+    if (targetSub) {
+      targetSub.sub_text = text;
+      updateState({ ...paperData, sections: newSections });
+    }
+  };
+
+  const handleSubQuestionNumberChange = (sIdx: number, qIdx: number, subIdx: number, num: string) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const targetSub = newSections[sIdx].questions[qIdx].sub_questions?.[subIdx];
+    if (targetSub) {
+      targetSub.sub_number = num;
+      updateState({ ...paperData, sections: newSections });
+    }
+  };
+
+  const handleSubQuestionMarksChange = (sIdx: number, qIdx: number, subIdx: number, marks: number) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const q = newSections[sIdx].questions[qIdx];
+    if (q.sub_questions && q.sub_questions[subIdx]) {
+      q.sub_questions[subIdx].marks = Number(marks) || 0;
+      q.marks = q.sub_questions.reduce((sum, s) => sum + (Number(s.marks) || 0), 0);
+      newSections[sIdx].section_marks = newSections[sIdx].questions.reduce((sum, item) => sum + (Number(item.marks) || 0), 0);
+      updateState({ ...paperData, sections: newSections });
+    }
+  };
+
+  const handleAddSubQuestion = (sIdx: number, qIdx: number) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const q = newSections[sIdx].questions[qIdx];
+    if (!q.sub_questions) {
+      q.sub_questions = [];
+    }
+    const devanagariNums = ["(१)", "(२)", "(३)", "(४)", "(५)", "(६)", "(७)", "(८)", "(९)", "(१०)"];
+    const nextIdx = q.sub_questions.length;
+    const label = nextIdx < devanagariNums.length ? devanagariNums[nextIdx] : `(${nextIdx + 1})`;
+    
+    q.sub_questions.push({
+      id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `sub-${Date.now()}-${Math.random()}`,
+      sub_number: label,
+      sub_text: "नया उपप्रश्न यहाँ लिखें...",
+      marks: 1,
+      items: [],
+      answer: ""
+    });
+    q.marks = q.sub_questions.reduce((sum, s) => sum + (Number(s.marks) || 0), 0);
+    newSections[sIdx].section_marks = newSections[sIdx].questions.reduce((sum, item) => sum + (Number(item.marks) || 0), 0);
+    updateState({ ...paperData, sections: newSections });
+  };
+
+  const handleDeleteSubQuestion = (sIdx: number, qIdx: number, subIdx: number) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const q = newSections[sIdx].questions[qIdx];
+    if (q.sub_questions) {
+      q.sub_questions.splice(subIdx, 1);
+      q.marks = q.sub_questions.reduce((sum, s) => sum + (Number(s.marks) || 0), 0);
+      newSections[sIdx].section_marks = newSections[sIdx].questions.reduce((sum, item) => sum + (Number(item.marks) || 0), 0);
+      updateState({ ...paperData, sections: newSections });
+    }
+  };
+
+  const handleDuplicateSubQuestion = (sIdx: number, qIdx: number, subIdx: number) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const q = newSections[sIdx].questions[qIdx];
+    if (q.sub_questions && q.sub_questions[subIdx]) {
+      const source = q.sub_questions[subIdx];
+      const cloned = {
+        ...JSON.parse(JSON.stringify(source)),
+        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `sub-${Date.now()}-${Math.random()}`,
+        sub_number: `${source.sub_number} (प्रतिलिपि)`
+      };
+      q.sub_questions.splice(subIdx + 1, 0, cloned);
+      q.marks = q.sub_questions.reduce((sum, s) => sum + (Number(s.marks) || 0), 0);
+      newSections[sIdx].section_marks = newSections[sIdx].questions.reduce((sum, item) => sum + (Number(item.marks) || 0), 0);
+      updateState({ ...paperData, sections: newSections });
+    }
+  };
+
+  const handleMoveSubQuestion = (sIdx: number, qIdx: number, subIdx: number, direction: "up" | "down") => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const q = newSections[sIdx].questions[qIdx];
+    if (!q.sub_questions) return;
+    const targetIdx = direction === "up" ? subIdx - 1 : subIdx + 1;
+    if (targetIdx < 0 || targetIdx >= q.sub_questions.length) return;
+    const temp = q.sub_questions[subIdx];
+    q.sub_questions[subIdx] = q.sub_questions[targetIdx];
+    q.sub_questions[targetIdx] = temp;
+    updateState({ ...paperData, sections: newSections });
+  };
+
+  const handleTogglePoem = (sIdx: number, qIdx: number) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    newSections[sIdx].questions[qIdx].is_poem = !newSections[sIdx].questions[qIdx].is_poem;
+    updateState({ ...paperData, sections: newSections });
+  };
+
+  const handleInstructionChange = (idx: number, text: string) => {
+    if (!paperData) return;
+    const newInsts = [...(paperData.general_instructions || [])];
+    newInsts[idx] = text;
+    updateState({ ...paperData, general_instructions: newInsts });
+  };
+
+  const handleAddInstruction = () => {
+    if (!paperData) return;
+    const newInsts = [...(paperData.general_instructions || []), "नई परीक्षा सूचना यहाँ लिखें..."];
+    updateState({ ...paperData, general_instructions: newInsts });
+  };
+
+  const handleDeleteInstruction = (idx: number) => {
+    if (!paperData) return;
+    const newInsts = [...(paperData.general_instructions || [])];
+    newInsts.splice(idx, 1);
+    updateState({ ...paperData, general_instructions: newInsts });
+  };
+
+  const handleSubItemChange = (sIdx: number, qIdx: number, subIdx: number, itemIdx: number, text: string) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const sub = newSections[sIdx].questions[qIdx].sub_questions?.[subIdx];
+    if (sub && sub.items) {
+      sub.items[itemIdx] = text;
+      updateState({ ...paperData, sections: newSections });
+    }
+  };
+
+  const handleAddSubItem = (sIdx: number, qIdx: number, subIdx: number) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const sub = newSections[sIdx].questions[qIdx].sub_questions?.[subIdx];
+    if (sub) {
+      if (!sub.items) sub.items = [];
+      sub.items.push(`घटक ${sub.items.length + 1} : ....................`);
+      updateState({ ...paperData, sections: newSections });
+    }
+  };
+
+  const handleDeleteSubItem = (sIdx: number, qIdx: number, subIdx: number, itemIdx: number) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    const sub = newSections[sIdx].questions[qIdx].sub_questions?.[subIdx];
+    if (sub && sub.items) {
+      sub.items.splice(itemIdx, 1);
+      updateState({ ...paperData, sections: newSections });
+    }
+  };
+
   const handleSavePaper = async () => {
     if (!paperId || !paperData) return;
 
@@ -475,13 +657,46 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
           </div>
 
           {/* General Instructions Block */}
-          <div className="border border-dashed border-slate-400 p-2.5 rounded-xs bg-slate-50 text-2xs mb-4">
-            <div className="font-bold text-slate-800 mb-1">सूचनाएँ :</div>
-            <ul className="list-disc pl-4 space-y-0.5 text-slate-700">
+          <div className="border border-dashed border-slate-400 p-3 rounded-xs bg-slate-50 text-2xs mb-4 space-y-2">
+            <div className="flex justify-between items-center">
+              <div className="font-bold text-slate-800">सूचनाएँ (General Instructions) :</div>
+              <button
+                type="button"
+                onClick={handleAddInstruction}
+                className="inline-flex items-center gap-1 text-2xs px-2 py-0.5 bg-white hover:bg-slate-200 border border-slate-300 rounded font-semibold text-slate-700 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" /> {t.addInstruction}
+              </button>
+            </div>
+            <div className="space-y-1.5">
               {paperData.general_instructions?.map((inst, i) => (
-                <li key={i}>{inst}</li>
+                <div key={i} className="flex items-start gap-2 group/inst">
+                  <span className="font-bold text-slate-500 mt-1">•</span>
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={inst}
+                      onChange={(e) => handleInstructionChange(i, e.target.value)}
+                      placeholder={t.instructionPlaceholder}
+                      className="w-full text-2xs text-slate-800 bg-white/70 border border-transparent hover:border-slate-300 focus:border-blue-500 rounded px-1.5 py-0.5 focus:outline-hidden"
+                    />
+                    {inst.includes("<") && (
+                      <div className="text-3xs text-slate-500 pl-1 mt-0.5">
+                        <FormattedText text={inst} />
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteInstruction(i)}
+                    className="opacity-0 group-hover/inst:opacity-100 p-1 text-slate-400 hover:text-rose-600 transition-opacity cursor-pointer"
+                    title="Delete Instruction"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
 
           {/* Sections & Questions */}
@@ -582,21 +797,29 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
 
                       {/* Question Row */}
                       <div className="flex justify-between items-start gap-3">
-                        <div className="flex-1 flex gap-2">
-                          <span className="font-bold text-xs text-slate-900 shrink-0">
-                            {q.question_number}
-                          </span>
-                          <textarea
-                            rows={2}
-                            value={q.question_text}
-                            onChange={(e) => handleQuestionTextChange(sIdx, qIdx, e.target.value)}
-                            className="w-full text-xs font-bold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-hidden resize-none"
-                          />
+                        <div className="flex-1 flex flex-col gap-1">
+                          <div className="flex items-start gap-2">
+                            <span className="font-bold text-xs text-slate-900 shrink-0 mt-0.5">
+                              {q.question_number}
+                            </span>
+                            <textarea
+                              rows={2}
+                              value={q.question_text}
+                              onChange={(e) => handleQuestionTextChange(sIdx, qIdx, e.target.value)}
+                              className="w-full text-xs font-bold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-hidden resize-none"
+                            />
+                          </div>
+                          {q.question_text?.includes("<") && (
+                            <div className="text-2xs text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-200 mt-0.5 flex items-center gap-1">
+                              <span className="font-bold text-slate-400 text-3xs shrink-0">{t.formattedPreviewLabel}</span>
+                              <FormattedText text={q.question_text} />
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <input
                             type="number"
-                            min="1"
+                            min="0"
                             value={q.marks}
                             onChange={(e) => handleQuestionMarksChange(sIdx, qIdx, parseInt(e.target.value, 10) || 0)}
                             className="w-12 px-1 py-0.5 border border-slate-300 rounded text-right text-xs font-bold"
@@ -608,9 +831,18 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
                       {/* Passage / Stanza if present */}
                       {q.passage !== undefined && (
                         <div className="mt-2.5">
-                          <label className="block text-2xs font-semibold text-slate-500 mb-0.5">
-                            {q.is_poem ? "पद्यांश पंक्तियाँ (Poem Stanza):" : "पठित गद्यांश (Prose Passage):"}
-                          </label>
+                          <div className="flex justify-between items-center mb-0.5">
+                            <label className="text-2xs font-semibold text-slate-500">
+                              {q.is_poem ? "पद्यांश पंक्तियाँ (Poem Stanza):" : "पठित गद्यांश (Prose Passage):"}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePoem(sIdx, qIdx)}
+                              className="text-3xs px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold cursor-pointer border border-slate-300"
+                            >
+                              {q.is_poem ? "गद्यांश रूप में बदलें" : "पद्यांश रूप में बदलें"}
+                            </button>
+                          </div>
                           <textarea
                             rows={4}
                             value={q.passage}
@@ -619,31 +851,154 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
                               q.is_poem ? "text-center" : "text-justify"
                             }`}
                           />
+                          {q.passage?.includes("<") && (
+                            <div className="text-2xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-200 mt-1">
+                              <span className="font-bold text-slate-400 text-3xs block mb-0.5">{t.formattedPreviewLabel}</span>
+                              <FormattedText text={q.passage} />
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      {/* Sub-questions display */}
-                      {q.sub_questions && q.sub_questions.length > 0 && (
-                        <div className="mt-2.5 pl-3 border-l-2 border-slate-200 space-y-2">
-                          {q.sub_questions.map((sub, subIdx) => (
-                            <div key={subIdx} className="text-xs space-y-1">
-                              <div className="flex justify-between items-start">
-                                <span className="font-semibold text-slate-800">
-                                  {sub.sub_number} {sub.sub_text}
-                                </span>
-                                <span className="text-slate-600 font-bold">({sub.marks} अंक)</span>
+                      {/* Sub-questions Section */}
+                      <div className="mt-3 pl-3 border-l-2 border-indigo-200 space-y-2.5">
+                        {q.sub_questions && q.sub_questions.map((sub, subIdx) => {
+                          const subKey = `${sIdx}-${qIdx}-${subIdx}`;
+                          const isSubRegenerating = regeneratingSubKey === subKey;
+
+                          return (
+                            <div
+                              key={sub.id || subIdx}
+                              className="group/sub relative bg-slate-50/80 hover:bg-slate-50 border border-slate-200 hover:border-indigo-300 rounded-lg p-2.5 transition-all text-xs"
+                            >
+                              {/* Subquestion Floating Actions */}
+                              <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover/sub:opacity-100 transition-opacity bg-white/95 backdrop-blur-xs p-0.5 rounded border border-slate-200 shadow-xs z-10">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRegenerateSubQuestion(sIdx, qIdx, subIdx)}
+                                  disabled={isSubRegenerating}
+                                  className="p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-30 cursor-pointer"
+                                  title={t.regenerateSubQuestionBtn}
+                                >
+                                  <RefreshCw className={`w-3 h-3 ${isSubRegenerating ? "animate-spin text-indigo-600" : ""}`} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveSubQuestion(sIdx, qIdx, subIdx, "up")}
+                                  disabled={subIdx === 0}
+                                  className="p-1 text-slate-500 hover:text-slate-800 disabled:opacity-30 cursor-pointer"
+                                  title="Move Up"
+                                >
+                                  <ArrowUp className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveSubQuestion(sIdx, qIdx, subIdx, "down")}
+                                  disabled={subIdx === (q.sub_questions?.length || 0) - 1}
+                                  className="p-1 text-slate-500 hover:text-slate-800 disabled:opacity-30 cursor-pointer"
+                                  title="Move Down"
+                                >
+                                  <ArrowDown className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDuplicateSubQuestion(sIdx, qIdx, subIdx)}
+                                  className="p-1 text-slate-500 hover:text-blue-600 cursor-pointer"
+                                  title="Duplicate"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSubQuestion(sIdx, qIdx, subIdx)}
+                                  className="p-1 text-slate-500 hover:text-rose-600 cursor-pointer"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
                               </div>
+
+                              {/* Subquestion Header & Inputs */}
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-start gap-1.5 flex-1">
+                                  <input
+                                    type="text"
+                                    value={sub.sub_number}
+                                    onChange={(e) => handleSubQuestionNumberChange(sIdx, qIdx, subIdx, e.target.value)}
+                                    className="w-12 font-bold text-slate-800 border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-hidden shrink-0"
+                                  />
+                                  <div className="flex-1">
+                                    <textarea
+                                      rows={1}
+                                      value={sub.sub_text}
+                                      onChange={(e) => handleSubQuestionTextChange(sIdx, qIdx, subIdx, e.target.value)}
+                                      className="w-full text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-hidden resize-none font-medium"
+                                    />
+                                    {sub.sub_text?.includes("<") && (
+                                      <div className="text-3xs text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200 mt-0.5 flex items-center gap-1">
+                                        <span className="font-bold text-slate-400 shrink-0">{t.formattedPreviewLabel}</span>
+                                        <FormattedText text={sub.sub_text} />
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0 ml-2">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={sub.marks}
+                                    onChange={(e) => handleSubQuestionMarksChange(sIdx, qIdx, subIdx, parseInt(e.target.value, 10) || 0)}
+                                    className="w-10 px-1 py-0.5 border border-slate-300 rounded text-right text-2xs font-bold"
+                                  />
+                                  <span className="text-2xs text-slate-500 font-semibold">अंक</span>
+                                </div>
+                              </div>
+
+                              {/* Items list */}
                               {sub.items && sub.items.length > 0 && (
-                                <ul className="pl-4 list-disc text-2xs text-slate-600 space-y-0.5">
+                                <div className="mt-2 pl-4 space-y-1">
                                   {sub.items.map((it, itIdx) => (
-                                    <li key={itIdx}>{it}</li>
+                                    <div key={itIdx} className="flex items-center gap-1.5 group/it">
+                                      <span className="text-3xs text-slate-400">•</span>
+                                      <input
+                                        type="text"
+                                        value={it}
+                                        onChange={(e) => handleSubItemChange(sIdx, qIdx, subIdx, itIdx, e.target.value)}
+                                        className="flex-1 text-2xs text-slate-700 bg-white/80 border border-transparent hover:border-slate-300 focus:border-blue-500 rounded px-1 py-0.5"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteSubItem(sIdx, qIdx, subIdx, itIdx)}
+                                        className="opacity-0 group-hover/it:opacity-100 p-0.5 text-slate-400 hover:text-rose-600 transition-opacity cursor-pointer"
+                                      >
+                                        <Trash2 className="w-2.5 h-2.5" />
+                                      </button>
+                                    </div>
                                   ))}
-                                </ul>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddSubItem(sIdx, qIdx, subIdx)}
+                                    className="text-3xs text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-0.5 pt-0.5 cursor-pointer"
+                                  >
+                                    <Plus className="w-2.5 h-2.5" /> घटक जोड़ें
+                                  </button>
+                                </div>
                               )}
                             </div>
-                          ))}
+                          );
+                        })}
+
+                        {/* Add Subquestion Button */}
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleAddSubQuestion(sIdx, qIdx)}
+                            className="inline-flex items-center gap-1 text-2xs px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-md transition-colors cursor-pointer border border-indigo-200"
+                          >
+                            <Plus className="w-3 h-3" /> {t.addSubQuestion}
+                          </button>
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })}

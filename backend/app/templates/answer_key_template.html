@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="hi">
 <head>
     <meta charset="UTF-8">
@@ -8,6 +8,9 @@
         @page { size: A4 portrait; margin: 10mm; }
         * { box-sizing: border-box; }
         body { font-family: Arial, "Devanagari Sangam MN", "Arial Unicode MS", "Mangal", sans-serif; font-size: 11pt; line-height: 1.45; color: #000; margin: 0; padding: 0; }
+        u { text-decoration: underline !important; text-underline-offset: 2px; }
+        b, strong { font-weight: bold !important; }
+        i, em { font-style: italic !important; }
         .container { width: 190mm; margin: 0 auto; }
         .header { text-align: center; border-bottom: 2pt solid #000; padding-bottom: 8pt; margin-bottom: 12pt; }
         .school-name { font-size: 16pt; font-weight: bold; }
@@ -45,15 +48,15 @@
                 </span>
             </div>
             <div style="font-size: 10pt; color: #475569; margin-bottom: 4pt;">
-                <strong>प्रश्न:</strong> {{ item.question_text }}
+                <strong>प्रश्न:</strong> {{ item.question_text | safe_html }}
             </div>
             <div class="ans-text">
-                <strong>अपेक्षित उत्तर:</strong> {{ item.expected_answer }}
+                <strong>अपेक्षित उत्तर:</strong> {{ item.expected_answer | safe_html }}
             </div>
             {% if item.points %}
             <ul class="points-list">
                 {% for pt in item.points %}
-                <li>{{ pt }}</li>
+                <li>{{ pt | safe_html }}</li>
                 {% endfor %}
             </ul>
             {% endif %}

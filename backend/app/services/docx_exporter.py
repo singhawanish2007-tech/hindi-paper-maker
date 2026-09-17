@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 from typing import Dict, Any, Optional
 import docx
 from docx.shared import Inches, Pt, RGBColor
@@ -7,6 +7,9 @@ from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 from app.core.config import settings
+
+from html.parser import HTMLParser
+import html
 
 def set_cell_border(cell, **kwargs):
     """
@@ -24,6 +27,109 @@ def set_cell_border(cell, **kwargs):
 def set_cell_background(cell, hex_color: str):
     shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
     cell._tc.get_or_add_tcPr().append(shading)
+
+class DocxHtmlParser(HTMLParser):
+    def __init__(
+        self,
+        paragraph,
+        default_font: str = "Arial",
+        default_size: Pt = Pt(10),
+        default_bold: bool = False,
+        default_italic: bool = False,
+        default_underline: bool = False,
+        default_color: Optional[RGBColor] = None
+    ):
+        super().__init__()
+        self.paragraph = paragraph
+        self.default_font = default_font
+        self.default_size = default_size
+        self.default_color = default_color
+        
+        self.bold = 1 if default_bold else 0
+        self.italic = 1 if default_italic else 0
+        self.underline = 1 if default_underline else 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in ("b", "strong"):
+            self.bold += 1
+        elif tag in ("i", "em"):
+            self.italic += 1
+        elif tag in ("u", "ins"):
+            self.underline += 1
+        elif tag in ("br", "br/"):
+            self.paragraph.add_run().add_break()
+        elif tag == "li":
+            run = self.paragraph.add_run("• ")
+            run.font.name = self.default_font
+            run.font.size = self.default_size
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in ("b", "strong"):
+            self.bold = max(0, self.bold - 1)
+        elif tag in ("i", "em"):
+            self.italic = max(0, self.italic - 1)
+        elif tag in ("u", "ins"):
+            self.underline = max(0, self.underline - 1)
+        elif tag == "li":
+            self.paragraph.add_run().add_break()
+
+    def handle_data(self, data):
+        if not data:
+            return
+        lines = data.split("\n")
+        for i, line in enumerate(lines):
+            if i > 0:
+                self.paragraph.add_run().add_break()
+            if line:
+                run = self.paragraph.add_run(line)
+                run.font.name = self.default_font
+                run.font.size = self.default_size
+                run.bold = bool(self.bold > 0)
+                run.italic = bool(self.italic > 0)
+                run.underline = bool(self.underline > 0)
+                if self.default_color:
+                    run.font.color.rgb = self.default_color
+
+def add_html_formatted_text(
+    paragraph,
+    text: str,
+    default_font: str = "Arial",
+    default_size: Pt = Pt(10),
+    default_bold: bool = False,
+    default_italic: bool = False,
+    default_underline: bool = False,
+    default_color: Optional[RGBColor] = None
+):
+    if not text:
+        return
+    if "<" not in str(text):
+        lines = str(text).split("\n")
+        for i, line in enumerate(lines):
+            if i > 0:
+                paragraph.add_run().add_break()
+            if line:
+                run = paragraph.add_run(line)
+                run.font.name = default_font
+                run.font.size = default_size
+                run.bold = default_bold
+                run.italic = default_italic
+                run.underline = default_underline
+                if default_color:
+                    run.font.color.rgb = default_color
+        return
+
+    parser = DocxHtmlParser(
+        paragraph=paragraph,
+        default_font=default_font,
+        default_size=default_size,
+        default_bold=default_bold,
+        default_italic=default_italic,
+        default_underline=default_underline,
+        default_color=default_color
+    )
+    parser.feed(str(text))
 
 def export_paper_to_docx(
     paper_data: Dict[str, Any],
@@ -135,12 +241,11 @@ def export_paper_to_docx(
         run_lbl.font.bold = True
         run_lbl.font.size = Pt(9.5)
         for inst in instructions:
-            p_item = doc.add_paragraph(f"• {inst}")
+            p_item = doc.add_paragraph()
             p_item.paragraph_format.left_indent = Inches(0.2)
             p_item.paragraph_format.space_before = Pt(0)
             p_item.paragraph_format.space_after = Pt(2)
-            p_item.runs[0].font.size = Pt(9)
-            p_item.runs[0].font.name = "Arial"
+            add_html_formatted_text(p_item, f"• {inst}", default_font="Arial", default_size=Pt(9))
 
     # Vibhags & Questions
     sections = paper_data.get("sections", [])
@@ -187,10 +292,7 @@ def export_paper_to_docx(
             p_qt = c_qtext.paragraphs[0]
             p_qt.paragraph_format.space_before = Pt(4)
             p_qt.paragraph_format.space_after = Pt(2)
-            run_qt = p_qt.add_run(f"{q_num} {q_text}")
-            run_qt.font.name = "Arial"
-            run_qt.font.size = Pt(10.5)
-            run_qt.font.bold = True
+            add_html_formatted_text(p_qt, f"{q_num} {q_text}", default_font="Arial", default_size=Pt(10.5), default_bold=True)
             
             p_qm = c_qmarks.paragraphs[0]
             p_qm.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -217,9 +319,7 @@ def export_paper_to_docx(
                 else:
                     p_pass.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                     
-                run_pass = p_pass.add_run(passage)
-                run_pass.font.name = "Arial"
-                run_pass.font.size = Pt(10)
+                add_html_formatted_text(p_pass, passage, default_font="Arial", default_size=Pt(10))
                 
             # Sub-questions
             sub_questions = q.get("sub_questions", [])
@@ -242,9 +342,7 @@ def export_paper_to_docx(
                     p_sub.paragraph_format.left_indent = Inches(0.2)
                     p_sub.paragraph_format.space_before = Pt(2)
                     p_sub.paragraph_format.space_after = Pt(2)
-                    run_sub = p_sub.add_run(f"{sub_num} {sub_text}")
-                    run_sub.font.name = "Arial"
-                    run_sub.font.size = Pt(10)
+                    add_html_formatted_text(p_sub, f"{sub_num} {sub_text}", default_font="Arial", default_size=Pt(10))
                     
                     p_smarks = c_sm.paragraphs[0]
                     p_smarks.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -256,12 +354,11 @@ def export_paper_to_docx(
                     
                     # Items list
                     for item in sub.get("items", []):
-                        p_it = doc.add_paragraph(f"{item}")
+                        p_it = doc.add_paragraph()
                         p_it.paragraph_format.left_indent = Inches(0.4)
                         p_it.paragraph_format.space_before = Pt(0)
                         p_it.paragraph_format.space_after = Pt(1)
-                        p_it.runs[0].font.name = "Arial"
-                        p_it.runs[0].font.size = Pt(9.5)
+                        add_html_formatted_text(p_it, str(item), default_font="Arial", default_size=Pt(9.5))
 
     # Mandatory Footer Text
     p_foot = doc.add_paragraph()
@@ -287,18 +384,25 @@ def export_paper_to_docx(
             p_ak = doc.add_paragraph()
             p_ak.paragraph_format.space_before = Pt(4)
             p_ak.paragraph_format.space_after = Pt(2)
-            r_qn = p_ak.add_run(f"{ans.get('section_title', '')} - {ans.get('question_number', '')} ({ans.get('marks', 1)} अंक)\n")
-            r_qn.font.bold = True
-            r_qn.font.size = Pt(10)
-            
-            r_ans = p_ak.add_run(f"उत्तर: {ans.get('expected_answer', '')}")
-            r_ans.font.size = Pt(9.5)
+            add_html_formatted_text(
+                p_ak,
+                f"{ans.get('section_title', '')} - {ans.get('question_number', '')} ({ans.get('marks', 1)} अंक)\n",
+                default_font="Arial",
+                default_size=Pt(10),
+                default_bold=True
+            )
+            add_html_formatted_text(
+                p_ak,
+                f"उत्तर: {ans.get('expected_answer', '')}",
+                default_font="Arial",
+                default_size=Pt(9.5)
+            )
             
             for pt in ans.get("points", []):
-                p_pt = doc.add_paragraph(f"• {pt}")
+                p_pt = doc.add_paragraph()
                 p_pt.paragraph_format.left_indent = Inches(0.25)
                 p_pt.paragraph_format.space_after = Pt(1)
-                p_pt.runs[0].font.size = Pt(9)
+                add_html_formatted_text(p_pt, f"• {pt}", default_font="Arial", default_size=Pt(9))
                 
     doc.save(str(output_path))
     return output_path

@@ -132,7 +132,13 @@ export const translations = {
     duplicateWarningBanner: "पुनरावृत्ति चेतावनी : इस प्रश्नपत्रिका में दोहराए गए प्रश्न पाए गए हैं। कृपया चिह्नित प्रश्नों को पुनः उत्पन्न करें या संपादित करें।",
     duplicateQuestionBadge: "दोहराया गया प्रश्न",
     mobileMenu: "मेनू",
-    closeMenu: "बंद करें"
+    closeMenu: "बंद करें",
+    addSubQuestion: "उपप्रश्न जोड़ें",
+    regenerateSubQuestionBtn: "उपप्रश्न पुनः उत्पन्न करें",
+    regeneratingSubQuestion: "पुनः उत्पन्न हो रहा है...",
+    addInstruction: "सूचना जोड़ें",
+    instructionPlaceholder: "सूचना यहाँ लिखें...",
+    formattedPreviewLabel: "प्रारूप पूर्वावलोकन :"
   },
   en: {
     // Nav
@@ -265,6 +271,12 @@ export const translations = {
     duplicateWarningBanner: "Duplicate Warning: Repeated questions detected in this paper. Please regenerate or edit the flagged questions.",
     duplicateQuestionBadge: "Duplicate Question",
     mobileMenu: "Menu",
-    closeMenu: "Close"
+    closeMenu: "Close",
+    addSubQuestion: "Add Subquestion",
+    regenerateSubQuestionBtn: "Regenerate Subquestion",
+    regeneratingSubQuestion: "Regenerating...",
+    addInstruction: "Add Instruction",
+    instructionPlaceholder: "Type instruction here...",
+    formattedPreviewLabel: "Format Preview :"
   }
 };

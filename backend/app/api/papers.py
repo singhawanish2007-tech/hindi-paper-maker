@@ -15,7 +15,12 @@ from app.schemas.paper import (
     AnswerKeyData
 )
 from app.services.paper_validator import validate_blueprint_data, validate_generated_or_edited_paper
-from app.services.ai_generator import generate_paper_with_gemini, generate_curriculum_paper_fallback, regenerate_single_question
+from app.services.ai_generator import (
+    generate_paper_with_gemini,
+    generate_curriculum_paper_fallback,
+    regenerate_single_question,
+    regenerate_single_subquestion
+)
 from app.services.pdf_exporter import render_paper_html, export_html_to_pdf, render_answer_key_html
 from app.services.docx_exporter import export_paper_to_docx
 from app.services.answer_key_service import generate_answer_key_from_paper
@@ -341,6 +346,78 @@ def regenerate_question_endpoint(
         "section_index": req.section_index,
         "question_index": req.question_index,
         "question": new_question,
+        "paper_data": paper_dict
+    }
+
+class RegenerateSubQuestionRequest(BaseModel):
+    section_index: int
+    question_index: int
+    subquestion_index: int
+
+@router.post("/{id}/regenerate-subquestion")
+def regenerate_subquestion_endpoint(
+    id: int,
+    req: RegenerateSubQuestionRequest,
+    db: Session = Depends(get_db)
+):
+    paper = db.query(Paper).filter(Paper.id == id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="प्रश्नपत्रिका उपलब्ध नहीं है।")
+
+    try:
+        paper_dict = json.loads(paper.paper_data_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"डेटा पार्सिंग त्रुटि: {str(e)}")
+
+    sections = paper_dict.get("sections", [])
+    if req.section_index < 0 or req.section_index >= len(sections):
+        raise HTTPException(status_code=400, detail="अमान्य विभाग अनुक्रमणिका (section index)")
+
+    questions = sections[req.section_index].get("questions", [])
+    if req.question_index < 0 or req.question_index >= len(questions):
+        raise HTTPException(status_code=400, detail="अमान्य प्रश्न अनुक्रमणिका (question index)")
+
+    subs = questions[req.question_index].get("sub_questions", [])
+    if req.subquestion_index < 0 or req.subquestion_index >= len(subs):
+        raise HTTPException(status_code=400, detail="अमान्य उपप्रश्न अनुक्रमणिका (subquestion index)")
+
+    try:
+        paper_dict = regenerate_single_subquestion(
+            paper_data=paper_dict,
+            section_index=req.section_index,
+            question_index=req.question_index,
+            subquestion_index=req.subquestion_index
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Validate updated paper
+    val = validate_generated_or_edited_paper(paper_dict)
+    if not val["is_valid"]:
+        raise HTTPException(status_code=422, detail=f"उपप्रश्न पुनर्जनन विसंगति: {'; '.join(val['errors'])}")
+
+    paper.paper_data_json = json.dumps(paper_dict, ensure_ascii=False)
+    paper.rendered_html = render_paper_html(paper_dict)
+    db.commit()
+
+    # Re-sync answer key if exists
+    try:
+        ans_key_dict = generate_answer_key_from_paper(paper_dict)
+        ans_db = db.query(AnswerKey).filter(AnswerKey.paper_id == paper.id).first()
+        if ans_db:
+            ans_db.answer_key_json = json.dumps(ans_key_dict, ensure_ascii=False)
+            db.commit()
+    except Exception:
+        pass
+
+    new_sub = paper_dict["sections"][req.section_index]["questions"][req.question_index]["sub_questions"][req.subquestion_index]
+
+    return {
+        "success": True,
+        "section_index": req.section_index,
+        "question_index": req.question_index,
+        "subquestion_index": req.subquestion_index,
+        "sub_question": new_sub,
         "paper_data": paper_dict
     }
 

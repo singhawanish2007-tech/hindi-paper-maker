@@ -1,7 +1,17 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 
 @layer base {
   body {
     font-family: Arial, "Devanagari Sangam MN", "Arial Unicode MS", "Mangal", sans-serif;
+  }
+  u {
+    text-decoration: underline !important;
+    text-underline-offset: 2px;
+  }
+  b, strong {
+    font-weight: bold !important;
+  }
+  i, em {
+    font-style: italic !important;
   }
 }

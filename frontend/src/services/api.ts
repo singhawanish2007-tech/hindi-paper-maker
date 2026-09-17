@@ -102,6 +102,15 @@ export const paperService = {
     return res.data;
   },
 
+  async regenerateSubQuestion(id: number, sectionIndex: number, questionIndex: number, subquestionIndex: number) {
+    const res = await api.post(`/papers/${id}/regenerate-subquestion`, {
+      section_index: sectionIndex,
+      question_index: questionIndex,
+      subquestion_index: subquestionIndex
+    });
+    return res.data;
+  },
+
   async delete(id: number): Promise<void> {
     await api.delete(`/papers/${id}`);
   },

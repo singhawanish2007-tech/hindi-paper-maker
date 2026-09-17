@@ -1,4 +1,4 @@
-﻿export interface Chapter {
+export interface Chapter {
   id?: number;
   unit_name: string;
   chapter_number: number;
@@ -29,6 +29,7 @@ export interface Textbook {
 }
 
 export interface SubQuestion {
+  id?: string;
   sub_number: string;
   sub_text: string;
   marks: number;

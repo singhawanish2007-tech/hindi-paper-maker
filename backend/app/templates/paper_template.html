@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="hi">
 <head>
     <meta charset="UTF-8">
@@ -18,10 +18,23 @@
             font-family: Arial, "Devanagari Sangam MN", "Arial Unicode MS", "Mangal", sans-serif;
             font-size: 11pt;
             line-height: 1.45;
-            color: #000000;
-            background-color: #ffffff;
+            color: #000;
             margin: 0;
             padding: 0;
+            width: 100%;
+        }
+
+        u {
+            text-decoration: underline !important;
+            text-underline-offset: 2px;
+        }
+
+        b, strong {
+            font-weight: bold !important;
+        }
+
+        i, em {
+            font-style: italic !important;
         }
 
         .container {
@@ -257,7 +270,7 @@
             <strong>सूचनाएँ :</strong>
             <ul>
                 {% for inst in general_instructions %}
-                <li>{{ inst }}</li>
+                <li>{{ inst | safe_html }}</li>
                 {% endfor %}
             </ul>
         </div>
@@ -271,13 +284,13 @@
             {% for q in section.questions %}
             <div style="margin-top: 6pt; page-break-inside: avoid; break-inside: avoid;">
                 <div class="question-row">
-                    <div class="question-text">{{ q.question_number }} {{ q.question_text }}</div>
+                    <div class="question-text">{{ q.question_number }} {{ q.question_text | safe_html }}</div>
                     <div class="marks">({{ q.marks }} अंक)</div>
                 </div>
 
                 {% if q.passage %}
                 <div class="passage {% if q.is_poem %}passage-poem{% endif %}">
-                    {{ q.passage | replace('\n', '<br>') | safe }}
+                    {{ q.passage | safe_html }}
                 </div>
                 {% endif %}
 
@@ -285,13 +298,13 @@
                     {% for sub in q.sub_questions %}
                     <div class="sub-question">
                         <div class="question-row">
-                            <div class="question-text">{{ sub.sub_number }} {{ sub.sub_text }}</div>
+                            <div class="question-text">{{ sub.sub_number }} {{ sub.sub_text | safe_html }}</div>
                             <div class="marks">({{ sub.marks }} अंक)</div>
                         </div>
                         {% if sub['items'] %}
                         <ol style="margin-top: 2pt;">
                             {% for item in sub['items'] %}
-                            <li>{{ item }}</li>
+                            <li>{{ item | safe_html }}</li>
                             {% endfor %}
                         </ol>
                         {% endif %}

@@ -7,8 +7,50 @@ import pymupdf
 from playwright.sync_api import sync_playwright
 from app.core.config import settings
 
+import re
+from markupsafe import Markup, escape
+
 TEMPLATES_DIR = settings.BASE_DIR / "app" / "templates"
 jinja_env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=True)
+
+ALLOWED_TAGS = {"u", "b", "strong", "i", "em", "br", "span", "p", "ul", "ol", "li"}
+
+def filter_safe_html(text: Any) -> Markup:
+    if text is None:
+        return Markup("")
+    s = str(text)
+    if "<" not in s:
+        return Markup(str(escape(s)).replace("\n", "<br>"))
+
+    out = []
+    pos = 0
+    for match in re.finditer(r"<[^>]+>", s):
+        start, end = match.span()
+        if start > pos:
+            out.append(str(escape(s[pos:start])).replace("\n", "<br>"))
+        tag_str = match.group(0)
+        tag_match = re.match(r"^<\s*(/?)\s*([a-zA-Z0-9]+)\s*(/?)>$", tag_str)
+        if tag_match:
+            slash = tag_match.group(1)
+            tag_name = tag_match.group(2).lower()
+            if tag_name in ALLOWED_TAGS:
+                if tag_name == "br":
+                    out.append("<br>")
+                elif slash:
+                    out.append(f"</{tag_name}>")
+                else:
+                    out.append(f"<{tag_name}>")
+            else:
+                out.append(str(escape(tag_str)))
+        else:
+            out.append(str(escape(tag_str)))
+        pos = end
+    if pos < len(s):
+        out.append(str(escape(s[pos:])).replace("\n", "<br>"))
+
+    return Markup("".join(out))
+
+jinja_env.filters["safe_html"] = filter_safe_html
 
 def get_logo_data_uri() -> str:
     logo_path = settings.ASSETS_DIR / "1000358221.png"
