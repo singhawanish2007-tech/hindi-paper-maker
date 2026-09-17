@@ -1,0 +1,14 @@
+﻿services:
+  - type: web
+    name: hindi-paper-maker
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8000
+      - key: GEMINI_API_KEY
+        sync: false

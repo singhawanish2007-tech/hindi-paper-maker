@@ -1,0 +1,20 @@
+﻿services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hindi-paper-maker
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - paper_data:/app/backend/storage
+      - db_data:/app/backend
+
+volumes:
+  paper_data:
+  db_data:

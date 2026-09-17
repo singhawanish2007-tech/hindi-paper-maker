@@ -1,0 +1,54 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+backend/.venv/
+.venv/
+venv/
+ENV/
+env/
+
+# Node / Frontend dependencies & build artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+backend/.env
+!backend/.env.example
+
+# SQLite Database
+*.db
+*.sqlite
+*.sqlite3
+backend/hindi_paper_maker.db
+
+# Storage artifacts (generated exports and uploaded textbooks)
+backend/storage/exports/*
+!backend/storage/exports/.gitkeep
+backend/storage/textbooks/*
+!backend/storage/textbooks/.gitkeep
+*.pdf
+
+# Operating system / IDE
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.log
+.idea/

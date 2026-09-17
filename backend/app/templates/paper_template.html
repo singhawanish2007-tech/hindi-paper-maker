@@ -1,0 +1,312 @@
+﻿<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ metadata.exam_title | safe }} - {{ metadata.subject }}</title>
+    <style>
+        @page {
+            size: A4 portrait;
+            margin: 10mm;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, "Devanagari Sangam MN", "Arial Unicode MS", "Mangal", sans-serif;
+            font-size: 11pt;
+            line-height: 1.45;
+            color: #000000;
+            background-color: #ffffff;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            width: 190mm;
+            margin: 0 auto;
+            padding: 0;
+        }
+
+        /* Table-based header avoids flexbox shifts in print engines */
+        .header-table {
+            width: 100%;
+            border-collapse: collapse;
+            border-bottom: 2pt solid #000;
+            margin-bottom: 8pt;
+            page-break-after: avoid;
+            break-after: avoid;
+        }
+
+        .header-table td {
+            vertical-align: middle;
+        }
+
+        .logo-cell {
+            width: 32mm;
+            padding-right: 6mm;
+        }
+
+        .logo-cell img {
+            width: 32mm;
+            height: auto;
+            display: block;
+        }
+
+        .school-info {
+            text-align: center;
+        }
+
+        .school-name {
+            font-size: 17pt;
+            font-weight: bold;
+            font-family: 'Times New Roman', Times, serif;
+            margin-bottom: 2pt;
+        }
+
+        .tagline {
+            font-size: 9.5pt;
+            font-weight: bold;
+            font-style: italic;
+            margin-bottom: 3pt;
+        }
+
+        .exam-title {
+            font-size: 13.5pt;
+            font-weight: bold;
+            margin: 0;
+        }
+
+        .details-table {
+            width: 100%;
+            border-collapse: collapse;
+            border-bottom: 1.5pt solid #000;
+            margin-bottom: 10pt;
+            font-weight: bold;
+            font-size: 10.5pt;
+            page-break-after: avoid;
+            break-after: avoid;
+        }
+
+        .details-table td {
+            padding-bottom: 4pt;
+        }
+
+        /* Instructions */
+        .instructions-block {
+            border: 1pt dashed #444;
+            padding: 4pt 8pt;
+            margin-bottom: 8pt;
+            font-size: 9.5pt;
+            background-color: #fafafa;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+
+        .instructions-block ul {
+            margin: 0;
+            padding-left: 14pt;
+        }
+
+        /* Section and break controls */
+        .vibhag {
+            margin-top: 10pt;
+        }
+
+        .vibhag-title {
+            text-align: center;
+            font-size: 11.5pt;
+            font-weight: bold;
+            margin-bottom: 6pt;
+            border: 1pt solid #000;
+            padding: 3pt;
+            background-color: #f0f0f0;
+            page-break-after: avoid;
+            break-after: avoid;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        /* Table layout prevents marks from overlapping questions */
+        .question-row {
+            display: table;
+            width: 100%;
+            margin-bottom: 3pt;
+            page-break-after: avoid;
+            break-after: avoid;
+        }
+
+        .question-text {
+            display: table-cell;
+            vertical-align: top;
+            font-weight: bold;
+            font-size: 11pt;
+        }
+
+        .marks {
+            display: table-cell;
+            vertical-align: top;
+            text-align: right;
+            white-space: nowrap;
+            width: 22mm;
+            font-weight: bold;
+            font-size: 11pt;
+        }
+
+        .passage {
+            border: 1.2pt solid #000;
+            padding: 6pt 8pt;
+            margin: 5pt 0;
+            line-height: 1.5;
+            font-size: 10.5pt;
+            background-color: #fcfcfc;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .passage-poem {
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        .sub-question {
+            padding-left: 8pt;
+            margin-top: 5pt;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+
+        ol,
+        ul {
+            margin-top: 2pt;
+            margin-bottom: 2pt;
+            padding-left: 16pt;
+        }
+
+        li {
+            margin-bottom: 2pt;
+        }
+
+        .footer-text {
+            text-align: center;
+            font-weight: bold;
+            font-size: 12pt;
+            margin-top: 15pt;
+            margin-bottom: 5pt;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+
+        .page-break {
+            page-break-before: always;
+            break-before: page;
+        }
+
+        @media print {
+            body {
+                width: 210mm;
+            }
+            .container {
+                width: 190mm;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header Table -->
+        <table class="header-table">
+            <tr>
+                {% if metadata.has_logo %}
+                <td class="logo-cell">
+                    <img src="{{ logo_url or '1000358221.png' }}" alt="Logo" onerror="this.style.display='none'">
+                </td>
+                {% endif %}
+                <td class="school-info">
+                    <div class="school-name">{{ metadata.school_name | safe }}</div>
+                    <div class="tagline">{{ metadata.tagline | safe }}</div>
+                    <h2 class="exam-title">{{ metadata.exam_title | safe }}</h2>
+                </td>
+            </tr>
+        </table>
+
+        <!-- Details Table -->
+        <table class="details-table">
+            <tr>
+                <td style="text-align: left;">कक्षा: {{ metadata.class_name }}वीं</td>
+                <td style="text-align: center;">विषय: {{ metadata.subject }}</td>
+                <td style="text-align: center;">समय: {{ metadata.duration }}</td>
+                <td style="text-align: right;">कुल अंक: {{ total_marks }}</td>
+            </tr>
+            {% if metadata.exam_date or metadata.academic_year %}
+            <tr>
+                <td style="text-align: left; font-size: 9.5pt; font-weight: normal;">सत्र: {{ metadata.academic_year or '2026-2027' }}</td>
+                <td colspan="2" style="text-align: center; font-size: 9.5pt; font-weight: normal;">{{ metadata.book }}</td>
+                <td style="text-align: right; font-size: 9.5pt; font-weight: normal;">{% if metadata.exam_date %}दिनांक: {{ metadata.exam_date }}{% endif %}</td>
+            </tr>
+            {% endif %}
+        </table>
+
+        <!-- General Instructions -->
+        {% if general_instructions %}
+        <div class="instructions-block">
+            <strong>सूचनाएँ :</strong>
+            <ul>
+                {% for inst in general_instructions %}
+                <li>{{ inst }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- Sections (Vibhags) -->
+        {% for section in sections %}
+        <div class="vibhag">
+            <div class="vibhag-title">{{ section.section_title }} ({{ section.section_marks }} अंक)</div>
+            
+            {% for q in section.questions %}
+            <div style="margin-top: 6pt; page-break-inside: avoid; break-inside: avoid;">
+                <div class="question-row">
+                    <div class="question-text">{{ q.question_number }} {{ q.question_text }}</div>
+                    <div class="marks">({{ q.marks }} अंक)</div>
+                </div>
+
+                {% if q.passage %}
+                <div class="passage {% if q.is_poem %}passage-poem{% endif %}">
+                    {{ q.passage | replace('\n', '<br>') | safe }}
+                </div>
+                {% endif %}
+
+                {% if q.sub_questions %}
+                    {% for sub in q.sub_questions %}
+                    <div class="sub-question">
+                        <div class="question-row">
+                            <div class="question-text">{{ sub.sub_number }} {{ sub.sub_text }}</div>
+                            <div class="marks">({{ sub.marks }} अंक)</div>
+                        </div>
+                        {% if sub['items'] %}
+                        <ol style="margin-top: 2pt;">
+                            {% for item in sub['items'] %}
+                            <li>{{ item }}</li>
+                            {% endfor %}
+                        </ol>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        <!-- Mandatory Footer -->
+        <div class="footer-text" style="text-align: center; font-weight: bold; font-size: 12pt; margin-top: 15pt; margin-bottom: 5pt; page-break-inside: avoid; break-inside: avoid;"> ---------ALL THE BEST!!!---------- </div>
+    </div>
+</body>
+</html>
+
+
