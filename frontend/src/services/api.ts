@@ -94,20 +94,55 @@ export const paperService = {
     return res.data;
   },
 
-  async regenerateQuestion(id: number, sectionIndex: number, questionIndex: number) {
-    const res = await api.post(`/papers/${id}/regenerate-question`, {
-      section_index: sectionIndex,
-      question_index: questionIndex
-    });
+  async regenerateQuestion(
+    id: number,
+    sectionIndexOrPayload: number | {
+      section_index: number;
+      question_index: number;
+      question_id?: string;
+      class_name?: string;
+      textbook_id?: number;
+      selected_chapters?: string[];
+      section_title?: string;
+      question_type?: string;
+      marks?: number;
+      used_questions?: string[];
+    },
+    questionIndex?: number
+  ) {
+    const payload = typeof sectionIndexOrPayload === "object"
+      ? sectionIndexOrPayload
+      : { section_index: sectionIndexOrPayload, question_index: questionIndex ?? 0 };
+    const res = await api.post(`/papers/${id}/regenerate-question`, payload);
     return res.data;
   },
 
-  async regenerateSubQuestion(id: number, sectionIndex: number, questionIndex: number, subquestionIndex: number) {
-    const res = await api.post(`/papers/${id}/regenerate-subquestion`, {
-      section_index: sectionIndex,
-      question_index: questionIndex,
-      subquestion_index: subquestionIndex
-    });
+  async regenerateSubQuestion(
+    id: number,
+    sectionIndexOrPayload: number | {
+      section_index: number;
+      question_index: number;
+      subquestion_index: number;
+      subquestion_id?: string;
+      class_name?: string;
+      textbook_id?: number;
+      selected_chapters?: string[];
+      section_title?: string;
+      question_type?: string;
+      marks?: number;
+      used_questions?: string[];
+    },
+    questionIndex?: number,
+    subquestionIndex?: number
+  ) {
+    const payload = typeof sectionIndexOrPayload === "object"
+      ? sectionIndexOrPayload
+      : {
+          section_index: sectionIndexOrPayload,
+          question_index: questionIndex ?? 0,
+          subquestion_index: subquestionIndex ?? 0
+        };
+    const res = await api.post(`/papers/${id}/regenerate-subquestion`, payload);
     return res.data;
   },
 

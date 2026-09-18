@@ -38,6 +38,7 @@ export interface SubQuestion {
 }
 
 export interface QuestionItem {
+  id?: string;
   question_number: string;
   question_text: string;
   marks: number;
@@ -60,6 +61,7 @@ export interface SectionItem {
 
 export interface PaperMetadata {
   class: string;
+  class_name?: string;
   subject: string;
   book: string;
   exam_type: string;

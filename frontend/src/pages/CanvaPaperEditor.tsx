@@ -77,6 +77,8 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
     return union > 0 && intersection / union >= 0.75;
   };
 
+  const [recentlyRegenerated, setRecentlyRegenerated] = useState<string[]>([]);
+
   const duplicateQuestionKeys = React.useMemo(() => {
     if (!paperData) return new Set<string>();
     const dupes = new Set<string>();
@@ -111,14 +113,74 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
   const marksDifference = Math.abs(configuredTotal - currentTotal);
   const isMarksValid = marksDifference === 0;
 
+  // Section-by-section marks validation
+  const sectionDiscrepancies = React.useMemo(() => {
+    if (!paperData) return [];
+    return paperData.sections
+      .map((sec, idx) => {
+        const actual = (sec.questions || []).reduce(
+          (sum, q) => sum + (Number(q.marks) || 0),
+          0
+        );
+        const expected = Number(sec.section_marks) || 0;
+        const diff = actual - expected;
+        return {
+          sectionIndex: idx,
+          title: sec.section_title || `विभाग ${idx + 1}`,
+          actual,
+          expected,
+          diff,
+          isMismatch: diff !== 0
+        };
+      })
+      .filter((s) => s.isMismatch);
+  }, [paperData]);
+
+  const getAllUsedQuestionSignatures = (): string[] => {
+    if (!paperData) return recentlyRegenerated;
+    const collected: string[] = [...recentlyRegenerated];
+    for (const sec of paperData.sections) {
+      for (const q of sec.questions) {
+        if (q.question_text) collected.push(q.question_text);
+        if (q.passage) collected.push(q.passage);
+        for (const sub of q.sub_questions || []) {
+          if (sub.sub_text) collected.push(sub.sub_text);
+        }
+      }
+    }
+    return collected;
+  };
+
   const handleRegenerateQuestion = async (sIdx: number, qIdx: number) => {
-    if (!paperId) return;
+    if (!paperId || !paperData) return;
     const key = `${sIdx}-${qIdx}`;
     setRegeneratingKey(key);
     try {
-      const res = await paperService.regenerateQuestion(paperId, sIdx, qIdx);
+      const targetSec = paperData.sections[sIdx];
+      const targetQ = targetSec?.questions[qIdx];
+      const used = getAllUsedQuestionSignatures();
+
+      const payload = {
+        section_index: sIdx,
+        question_index: qIdx,
+        question_id: targetQ?.id,
+        class_name: paperData.metadata?.class_name || paperData.metadata?.class,
+        section_title: targetSec?.section_title,
+        question_type: targetQ?.source_type,
+        marks: targetQ?.marks,
+        used_questions: used
+      };
+
+      const res = await paperService.regenerateQuestion(paperId, payload);
       if (res.paper_data) {
         updateState(res.paper_data);
+        const newQText = res.question?.question_text;
+        const newPassage = res.question?.passage;
+        setRecentlyRegenerated((prev) => [
+          ...prev,
+          ...(newQText ? [newQText] : []),
+          ...(newPassage ? [newPassage] : [])
+        ]);
         setSaveMessage(
           lang === "hi"
             ? "प्रश्न सफलतापूर्वक पुनः उत्पन्न हुआ!"
@@ -186,6 +248,13 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
       }
     };
     updateState(updated);
+  };
+
+  const handleQuestionNumberChange = (sIdx: number, qIdx: number, num: string) => {
+    if (!paperData) return;
+    const newSections = [...paperData.sections];
+    newSections[sIdx].questions[qIdx].question_number = num;
+    updateState({ ...paperData, sections: newSections });
   };
 
   const handleQuestionTextChange = (sIdx: number, qIdx: number, text: string) => {
@@ -267,13 +336,33 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
   };
 
   const handleRegenerateSubQuestion = async (sIdx: number, qIdx: number, subIdx: number) => {
-    if (!paperId) return;
+    if (!paperId || !paperData) return;
     const key = `${sIdx}-${qIdx}-${subIdx}`;
     setRegeneratingSubKey(key);
     try {
-      const res = await paperService.regenerateSubQuestion(paperId, sIdx, qIdx, subIdx);
+      const targetSec = paperData.sections[sIdx];
+      const targetQ = targetSec?.questions[qIdx];
+      const targetSub = targetQ?.sub_questions?.[subIdx];
+      const used = getAllUsedQuestionSignatures();
+
+      const payload = {
+        section_index: sIdx,
+        question_index: qIdx,
+        subquestion_index: subIdx,
+        subquestion_id: targetSub?.id,
+        class_name: paperData.metadata?.class_name || paperData.metadata?.class,
+        section_title: targetSec?.section_title,
+        marks: targetSub?.marks,
+        used_questions: used
+      };
+
+      const res = await paperService.regenerateSubQuestion(paperId, payload);
       if (res.paper_data) {
         updateState(res.paper_data);
+        const updatedSub = res.paper_data.sections[sIdx]?.questions[qIdx]?.sub_questions?.[subIdx];
+        if (updatedSub?.sub_text) {
+          setRecentlyRegenerated((prev) => [...prev, updatedSub.sub_text]);
+        }
         setSaveMessage(
           lang === "hi"
             ? "उपप्रश्न सफलतापूर्वक पुनः उत्पन्न हुआ!"
@@ -448,14 +537,22 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
   const handleSavePaper = async () => {
     if (!paperId || !paperData) return;
 
-    if (!isMarksValid) {
-      if (
-        !window.confirm(
-          lang === "hi"
-            ? `चेतावनी: अंक असंगत हैं (अंतर: ${marksDifference} अंक)। क्या आप इसे प्रारूप (Draft) के रूप में सहेजना चाहते हैं?`
-            : `Warning: Marks mismatch (difference: ${marksDifference} marks). Do you want to save as Draft?`
-        )
-      ) {
+    if (!isMarksValid || sectionDiscrepancies.length > 0) {
+      let msg = "";
+      if (lang === "hi") {
+        msg = `चेतावनी: अंक असंगत हैं (कुल अंतर: ${marksDifference} अंक)।\n`;
+        if (sectionDiscrepancies.length > 0) {
+          msg += "असंतुलित विभाग:\n" + sectionDiscrepancies.map(sd => `• ${sd.title}: अपेक्षित ${sd.expected} अंक, वर्तमान ${sd.actual} अंक`).join("\n") + "\n";
+        }
+        msg += "\nक्या आप इसे प्रारूप (Draft) के रूप में सहेजना चाहते हैं?";
+      } else {
+        msg = `Warning: Marks mismatch (difference: ${marksDifference} marks).\n`;
+        if (sectionDiscrepancies.length > 0) {
+          msg += "Mismatched sections:\n" + sectionDiscrepancies.map(sd => `• ${sd.title}: expected ${sd.expected}, actual ${sd.actual}`).join("\n") + "\n";
+        }
+        msg += "\nDo you want to save as Draft?";
+      }
+      if (!window.confirm(msg)) {
         return;
       }
     }
@@ -565,6 +662,28 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
             <p className="text-xs text-amber-800 mt-0.5">
               {t.duplicateWarningBanner}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Section Marks Mismatch Banner */}
+      {sectionDiscrepancies.length > 0 && (
+        <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 flex items-start gap-3 shadow-xs animate-in fade-in">
+          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h4 className="text-xs font-bold text-rose-900">
+              {lang === "hi" ? "विभाग-वार अंक असंतुलन (Section Marks Mismatch)" : "Section Marks Mismatch Detected"}
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+              {sectionDiscrepancies.map((sd) => (
+                <div key={sd.sectionIndex} className="bg-white/90 border border-rose-200 rounded-md px-3 py-1.5 flex items-center justify-between text-2xs">
+                  <span className="font-semibold text-slate-800">{sd.title}</span>
+                  <span className="font-bold text-rose-700">
+                    अपेक्षित: {sd.expected} अंक | वर्तमान: {sd.actual} अंक ({sd.diff > 0 ? `+${sd.diff}` : sd.diff})
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -704,7 +823,7 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
             {paperData.sections.map((sec, sIdx) => (
               <div key={sIdx} className="space-y-3">
                 {/* Section Title Banner */}
-                <div className="bg-slate-100 border border-black p-1.5 flex justify-between items-center text-xs font-bold">
+                <div className="bg-slate-100 border border-black p-1.5 flex flex-wrap justify-between items-center text-xs font-bold gap-2">
                   <input
                     type="text"
                     value={sec.section_title}
@@ -713,11 +832,41 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
                       newSecs[sIdx].section_title = e.target.value;
                       updateState({ ...paperData, sections: newSecs });
                     }}
-                    className="flex-1 bg-transparent font-bold text-center focus:outline-hidden"
+                    className="flex-1 min-w-[180px] bg-transparent font-bold text-center sm:text-left px-2 focus:outline-hidden"
                   />
-                  <span className="text-slate-800 shrink-0">
-                    ({sec.section_marks} अंक)
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-slate-600 font-semibold text-2xs">निर्धारित:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={sec.section_marks}
+                      onChange={(e) => {
+                        const newSecs = [...paperData.sections];
+                        newSecs[sIdx].section_marks = parseInt(e.target.value, 10) || 0;
+                        updateState({ ...paperData, sections: newSecs });
+                      }}
+                      className="w-12 px-1 py-0.5 border border-slate-300 rounded text-right font-bold text-xs bg-white"
+                    />
+                    <span className="text-slate-700">अंक</span>
+                    {(() => {
+                      const actual = sec.questions.reduce((sum, q) => sum + (Number(q.marks) || 0), 0);
+                      const expected = Number(sec.section_marks) || 0;
+                      if (actual !== expected) {
+                        return (
+                          <span className="ml-1 px-2 py-0.5 rounded-full text-3xs font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                            असंगत (योग: {actual})
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="ml-1 px-2 py-0.5 rounded-full text-3xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                          संतुलित
+                        </span>
+                      );
+                    })()}
+                  </div>
                 </div>
 
                 {/* Questions */}
@@ -736,7 +885,7 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
                       }`}
                     >
                       {/* Floating Question Action Buttons */}
-                      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 backdrop-blur-xs p-1 rounded-md border border-slate-200 shadow-xs z-10">
+                      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-white/95 backdrop-blur-xs p-1 rounded-md border border-slate-200 shadow-xs z-10">
                         <button
                           onClick={() => handleRegenerateQuestion(sIdx, qIdx)}
                           disabled={isRegenerating}
@@ -799,9 +948,12 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
                       <div className="flex justify-between items-start gap-3">
                         <div className="flex-1 flex flex-col gap-1">
                           <div className="flex items-start gap-2">
-                            <span className="font-bold text-xs text-slate-900 shrink-0 mt-0.5">
-                              {q.question_number}
-                            </span>
+                            <input
+                              type="text"
+                              value={q.question_number}
+                              onChange={(e) => handleQuestionNumberChange(sIdx, qIdx, e.target.value)}
+                              className="w-20 font-bold text-xs text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-hidden shrink-0 mt-0.5"
+                            />
                             <textarea
                               rows={2}
                               value={q.question_text}
@@ -872,7 +1024,7 @@ export const CanvaPaperEditor: React.FC<CanvaPaperEditorProps> = ({
                               className="group/sub relative bg-slate-50/80 hover:bg-slate-50 border border-slate-200 hover:border-indigo-300 rounded-lg p-2.5 transition-all text-xs"
                             >
                               {/* Subquestion Floating Actions */}
-                              <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover/sub:opacity-100 transition-opacity bg-white/95 backdrop-blur-xs p-0.5 rounded border border-slate-200 shadow-xs z-10">
+                              <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover/sub:opacity-100 transition-opacity bg-white/95 backdrop-blur-xs p-0.5 rounded border border-slate-200 shadow-xs z-10">
                                 <button
                                   type="button"
                                   onClick={() => handleRegenerateSubQuestion(sIdx, qIdx, subIdx)}

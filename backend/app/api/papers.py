@@ -285,6 +285,14 @@ from pydantic import BaseModel
 class RegenerateQuestionRequest(BaseModel):
     section_index: int
     question_index: int
+    question_id: Optional[str] = None
+    class_name: Optional[str] = None
+    textbook_id: Optional[int] = None
+    selected_chapters: Optional[List[str]] = None
+    section_title: Optional[str] = None
+    question_type: Optional[str] = None
+    marks: Optional[int] = None
+    used_questions: Optional[List[str]] = None
 
 @router.post("/{id}/regenerate-question")
 def regenerate_question_endpoint(
@@ -313,7 +321,15 @@ def regenerate_question_endpoint(
         new_question = regenerate_single_question(
             paper_data=paper_dict,
             section_index=req.section_index,
-            question_index=req.question_index
+            question_index=req.question_index,
+            question_id=req.question_id,
+            class_name=req.class_name or paper.grade or paper_dict.get("metadata", {}).get("class_name"),
+            textbook_id=req.textbook_id or paper.textbook_id,
+            selected_chapters=req.selected_chapters,
+            section_title=req.section_title,
+            question_type=req.question_type,
+            marks=req.marks,
+            used_questions=req.used_questions
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -353,6 +369,14 @@ class RegenerateSubQuestionRequest(BaseModel):
     section_index: int
     question_index: int
     subquestion_index: int
+    subquestion_id: Optional[str] = None
+    class_name: Optional[str] = None
+    textbook_id: Optional[int] = None
+    selected_chapters: Optional[List[str]] = None
+    section_title: Optional[str] = None
+    question_type: Optional[str] = None
+    marks: Optional[int] = None
+    used_questions: Optional[List[str]] = None
 
 @router.post("/{id}/regenerate-subquestion")
 def regenerate_subquestion_endpoint(
@@ -386,7 +410,15 @@ def regenerate_subquestion_endpoint(
             paper_data=paper_dict,
             section_index=req.section_index,
             question_index=req.question_index,
-            subquestion_index=req.subquestion_index
+            subquestion_index=req.subquestion_index,
+            subquestion_id=req.subquestion_id,
+            class_name=req.class_name or paper.grade or paper_dict.get("metadata", {}).get("class_name"),
+            textbook_id=req.textbook_id or paper.textbook_id,
+            selected_chapters=req.selected_chapters,
+            section_title=req.section_title,
+            question_type=req.question_type,
+            marks=req.marks,
+            used_questions=req.used_questions
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

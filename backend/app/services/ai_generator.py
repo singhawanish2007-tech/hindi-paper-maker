@@ -7,6 +7,15 @@ from typing import Dict, Any, List, Optional, Set
 from google import genai
 from google.genai import types
 from app.core.config import settings
+from app.core.class_content import (
+    get_class_content,
+    get_prose_for_class,
+    get_poetry_for_class,
+    get_grammar_for_class,
+    get_writing_for_class,
+    normalize_grade
+)
+from app.core.curriculum_data import DEFAULT_BLUEPRINTS
 from app.services.paper_validator import validate_generated_or_edited_paper, check_prohibited_poetry_content
 from app.services.question_uniqueness import (
     is_duplicate_question,
@@ -403,26 +412,46 @@ def generate_curriculum_paper_fallback(
 ) -> Dict[str, Any]:
     """
     Intelligent curriculum-based generator conforming 100% to Maharashtra State Board standards.
-    Strictly guarantees complete question uniqueness across all sections and subquestions.
+    Strictly separates Class 5, 6, 7, 8, 9, 10 textbook content.
+    Tags each question with class_name, textbook, and chapter.
+    Guarantees complete question uniqueness across all sections and subquestions.
     """
+    raw_grade = metadata.get("class_name") or metadata.get("class") or metadata.get("grade") or "10"
+    grade = normalize_grade(raw_grade)
+    class_data = get_class_content(grade)
+    book_title = class_data.get("book", "हिंदी पाठ्यपुस्तक")
+    
+    selected_chap_titles = [c.get("title", "") for c in selected_chapters if c.get("title")]
+    prose_pool = get_prose_for_class(grade, selected_chap_titles)
+    poetry_pool = get_poetry_for_class(grade, selected_chap_titles)
+    grammar_pool = get_grammar_for_class(grade)
+    writing_pool = get_writing_for_class(grade)
+    
     total_marks = metadata.get("total_marks", 40)
-    grade = str(metadata.get("class_name", "10"))
-    
-    chaps = [c.get("title", "") for c in selected_chapters if c.get("title")]
-    primary_chapter = chaps[0] if chaps else "लक्ष्मी"
-    
-    # Used questions tracker for this generation request
     used_questions: List[Dict[str, Any]] = []
     
     bp_sections = blueprint.get("sections", [])
     if not bp_sections:
-        bp_sections = [
-            {"section_number": 1, "section_title": "विभाग १: गद्य", "section_marks": 12},
-            {"section_number": 2, "section_title": "विभाग २: पद्य", "section_marks": 8},
-            {"section_number": 3, "section_title": "विभाग ३: पूरक पठन", "section_marks": 4},
-            {"section_number": 4, "section_title": "विभाग ४: भाषा अध्ययन (व्याकरण)", "section_marks": 8},
-            {"section_number": 5, "section_title": "विभाग ५: उपयोजित लेखन", "section_marks": 8},
-        ]
+        if grade in ["5", "6", "7", "8"]:
+            bp_key = "middle_school_unit_test" if total_marks <= 25 else "middle_school_semester"
+        else:
+            bp_key = "high_school_unit_test" if total_marks <= 50 else "high_school_semester"
+
+        raw_bp = DEFAULT_BLUEPRINTS.get(bp_key, {})
+        bp_sections = json.loads(json.dumps(raw_bp.get("sections", [])))
+        if not bp_sections:
+            bp_sections = [
+                {"section_number": 1, "section_title": "विभाग १: गद्य", "section_marks": 12},
+                {"section_number": 2, "section_title": "विभाग २: पद्य", "section_marks": 8},
+                {"section_number": 3, "section_title": "विभाग ३: पूरक पठन", "section_marks": 4},
+                {"section_number": 4, "section_title": "विभाग ४: भाषा अध्ययन (व्याकरण)", "section_marks": 8},
+                {"section_number": 5, "section_title": "विभाग ५: उपयोजित लेखन", "section_marks": 8},
+            ]
+
+        current_sum = sum(s.get("section_marks", 0) for s in bp_sections)
+        if current_sum != total_marks and bp_sections:
+            diff = total_marks - current_sum
+            bp_sections[-1]["section_marks"] = max(2, bp_sections[-1]["section_marks"] + diff)
         
     sections_data = []
     prose_idx = 0
@@ -446,8 +475,8 @@ def generate_curriculum_paper_fallback(
                 q_num_label = f"प्रश्न {s_num}. ({'अ' if p_sub_i == 0 else 'आ'})" if sub_count > 1 else f"प्रश्न {s_num}."
                 current_m = half if p_sub_i == 0 else (s_marks - half)
                 
-                # Pick a distinct prose passage
-                passage_data = PROSE_PASSAGES[prose_idx % len(PROSE_PASSAGES)]
+                # Pick distinct prose passage from class pool
+                passage_data = prose_pool[prose_idx % len(prose_pool)]
                 prose_idx += 1
                 
                 # Build subquestions summing to current_m
@@ -457,21 +486,25 @@ def generate_curriculum_paper_fallback(
                     s_txt, s_m, s_ans = sub_info
                     if sub_alloc + s_m <= current_m:
                         sub_q_list.append({
+                            "id": str(uuid.uuid4()),
                             "sub_number": f"({s_label + 1})",
                             "sub_text": s_txt,
                             "marks": s_m,
                             "items": ["१. ....................", "२. ...................."] if "संजाल" in s_txt or "आकृति" in s_txt or "तालिका" in s_txt else [],
-                            "answer": ", ".join(s_ans)
+                            "answer": ", ".join(s_ans) if isinstance(s_ans, list) else str(s_ans)
                         })
                         sub_alloc += s_m
                 if sub_alloc < current_m and sub_q_list:
                     sub_q_list[-1]["marks"] += (current_m - sub_alloc)
                     
                 q_obj = {
+                    "id": str(uuid.uuid4()),
                     "question_number": q_num_label,
                     "question_text": "निम्नलिखित पठित गद्यांश पढ़कर सूचनाओं के अनुसार कृतियाँ कीजिए :",
                     "marks": current_m,
                     "source_type": "textbook",
+                    "class_name": grade,
+                    "textbook": book_title,
                     "chapter": passage_data["chapter"],
                     "source_page": str(p_sub_i * 4 + 1),
                     "source_confidence": "high",
@@ -490,7 +523,7 @@ def generate_curriculum_paper_fallback(
 
         # 2. Poetry Section (पद्य)
         elif "पद्य" in s_title:
-            p_data = POETRY_PASSAGES[poetry_idx % len(POETRY_PASSAGES)]
+            p_data = poetry_pool[poetry_idx % len(poetry_pool)]
             poetry_idx += 1
             
             sub_q_list = []
@@ -499,21 +532,25 @@ def generate_curriculum_paper_fallback(
                 s_txt, s_m, s_ans = sub_info
                 if sub_alloc + s_m <= s_marks:
                     sub_q_list.append({
+                        "id": str(uuid.uuid4()),
                         "sub_number": f"({s_label + 1})",
                         "sub_text": s_txt,
                         "marks": s_m,
-                        "items": ["१. ....................", "२. ...................."] if "संजाल" in s_txt or "उचित" in s_txt else [],
-                        "answer": ", ".join(s_ans)
+                        "items": ["१. ....................", "२. ...................."] if "संजाल" in s_txt or "उचित" in s_txt or "आकृति" in s_txt else [],
+                        "answer": ", ".join(s_ans) if isinstance(s_ans, list) else str(s_ans)
                     })
                     sub_alloc += s_m
             if sub_alloc < s_marks and sub_q_list:
                 sub_q_list[-1]["marks"] += (s_marks - sub_alloc)
                 
             q_obj = {
+                "id": str(uuid.uuid4()),
                 "question_number": f"प्रश्न {s_num}.",
                 "question_text": "निम्नलिखित पठित पद्यांश पढ़कर सूचनाओं के अनुसार कृतियाँ कीजिए :",
                 "marks": s_marks,
                 "source_type": "textbook",
+                "class_name": grade,
+                "textbook": book_title,
                 "chapter": p_data["chapter"],
                 "source_page": "1",
                 "source_confidence": "high",
@@ -530,33 +567,42 @@ def generate_curriculum_paper_fallback(
 
         # 3. Supplementary Section (पूरक पठन)
         elif "पूरक" in s_title:
+            # Use class-appropriate passage for पूरक पठन
+            supp_passage = prose_pool[(prose_idx) % len(prose_pool)]
+            prose_idx += 1
+            
+            sub_q_list = []
+            sub_alloc = 0
+            for s_label, sub_info in enumerate(supp_passage["subs"][:2]):
+                s_txt, s_m, s_ans = sub_info
+                if sub_alloc + s_m <= s_marks:
+                    sub_q_list.append({
+                        "id": str(uuid.uuid4()),
+                        "sub_number": f"({s_label + 1})",
+                        "sub_text": s_txt,
+                        "marks": s_m,
+                        "items": [],
+                        "answer": ", ".join(s_ans) if isinstance(s_ans, list) else str(s_ans)
+                    })
+                    sub_alloc += s_m
+            if sub_alloc < s_marks and sub_q_list:
+                sub_q_list[-1]["marks"] += (s_marks - sub_alloc)
+                
             q_obj = {
+                "id": str(uuid.uuid4()),
                 "question_number": f"प्रश्न {s_num}.",
-                "question_text": "निम्नलिखित पठित पद्यांश / गद्यांश पढ़कर सूचनाओं के अनुसार कृतियाँ कीजिए :",
+                "question_text": "निम्नलिखित पठित गद्यांश पढ़कर सूचनाओं के अनुसार कृतियाँ कीजिए :",
                 "marks": s_marks,
                 "source_type": "textbook",
-                "chapter": "मन (पूरक पठन)",
-                "source_page": "17",
+                "class_name": grade,
+                "textbook": book_title,
+                "chapter": f"{supp_passage['chapter']} (पूरक पठन)",
+                "source_page": "1",
                 "source_confidence": "high",
-                "answer": "पूरक पठन कृतियाँ",
-                "passage": "घना अँधेरा\nचमकता प्रकाश\nऔर अधिक ।।\n\nकरते जाओ\nपाने की मत सोचो\nजीवन सारा ।।",
-                "is_poem": True,
-                "sub_questions": [
-                    {
-                        "sub_number": "(1)",
-                        "sub_text": "जोड़ियाँ मिलाइए :",
-                        "marks": 2,
-                        "items": ["१. घना अँधेरा - ....................", "२. जीवन सारा - ...................."],
-                        "answer": "१. प्रकाश, २. कर्म"
-                    },
-                    {
-                        "sub_number": "(2)",
-                        "sub_text": "स्वमत अभिव्यक्ति : 'कर्म करते रहना ही जीवन का वास्तविक मार्ग है', अपने विचार लिखिए ।",
-                        "marks": max(1, s_marks - 2),
-                        "items": [],
-                        "answer": "सच्चा मनुष्य वही है जो फल की चिंता किए बिना निरंतर कर्म करता रहता है।"
-                    }
-                ]
+                "answer": f"{supp_passage['chapter']} आधारित पूरक पठन कृतियाँ।",
+                "passage": supp_passage["text"],
+                "is_poem": False,
+                "sub_questions": sub_q_list
             }
             is_dup, reason = is_duplicate_question(q_obj, used_questions)
             if is_dup:
@@ -569,13 +615,13 @@ def generate_curriculum_paper_fallback(
             sub_q = []
             allocated = 0
             
-            # Select unused grammar items
-            for idx, g_item in enumerate(GRAMMAR_POOL):
+            for idx, g_item in enumerate(grammar_pool):
                 if idx in grammar_used_indices:
                     continue
                 g_m = g_item["marks"]
                 if allocated + g_m <= s_marks:
                     sub_candidate = {
+                        "id": str(uuid.uuid4()),
                         "sub_number": f"({len(sub_q) + 1})",
                         "sub_text": f"{g_item['type']} : {g_item['text']}",
                         "marks": g_m,
@@ -592,11 +638,14 @@ def generate_curriculum_paper_fallback(
                 sub_q[-1]["marks"] += (s_marks - allocated)
                 
             q_obj = {
+                "id": str(uuid.uuid4()),
                 "question_number": f"प्रश्न {s_num}.",
                 "question_text": "सूचनाओं के अनुसार कृतियाँ कीजिए :",
                 "marks": s_marks,
                 "source_type": "textbook",
-                "chapter": "भाषा अध्ययन",
+                "class_name": grade,
+                "textbook": book_title,
+                "chapter": "भाषा अध्ययन (व्याकरण)",
                 "source_page": "",
                 "source_confidence": "high",
                 "answer": "व्याकरण घटकों के उत्तर",
@@ -604,112 +653,88 @@ def generate_curriculum_paper_fallback(
                 "is_poem": False,
                 "sub_questions": sub_q
             }
-            
             is_dup, reason = is_duplicate_question(q_obj, used_questions)
             if is_dup:
                 raise ValueError("इस विभाग में पर्याप्त अलग-अलग प्रश्न उपलब्ध नहीं हैं। कृपया अधिक अध्याय चुनें या प्रश्नों की संख्या कम करें।")
-                
             used_questions.append(q_obj)
             questions.append(q_obj)
 
         # 5. Writing Section (उपयोजित लेखन)
         elif "लेखन" in s_title or "उपयोजित" in s_title:
             half = s_marks // 2 if s_marks >= 8 else s_marks
-            sub_count = 2 if s_marks >= 8 else 1
-            used_genres = set()
+            writing_count = 2 if s_marks >= 8 else 1
             
-            for w_i in range(sub_count):
-                q_num_label = f"प्रश्न {s_num}. ({'अ' if w_i == 0 else 'आ'})" if sub_count > 1 else f"प्रश्न {s_num}."
-                current_m = half if w_i == 0 else (s_marks - half)
+            for w_idx in range(writing_count):
+                q_num_label = f"प्रश्न {s_num}. ({'अ' if w_idx == 0 else 'आ'})" if writing_count > 1 else f"प्रश्न {s_num}."
+                current_w_marks = half if w_idx == 0 else (s_marks - half)
                 
-                # Pick an unused, non-duplicate writing topic with randomized selection
-                chosen_w = None
-                q_obj = None
-                candidate_indices = list(range(len(WRITING_POOL)))
-                random.shuffle(candidate_indices)
+                selected_w = None
+                used_genres = {writing_pool[u].get("genre") for u in writing_used_indices if u < len(writing_pool) and writing_pool[u].get("genre")}
                 
-                # Pass 1: pick a topic with a fresh genre not yet used in this section
-                for idx in candidate_indices:
+                # Pass 1: Try unused item with unused genre
+                for idx, w_item in enumerate(writing_pool):
                     if idx in writing_used_indices:
                         continue
-                    w_item = WRITING_POOL[idx]
-                    genre = w_item.get("genre", w_item["type"])
-                    if genre in used_genres and len(used_genres) < 4:
+                    if w_item.get("genre") and w_item.get("genre") in used_genres:
                         continue
-                    candidate_q = {
-                        "question_number": q_num_label,
-                        "question_text": w_item["title"],
-                        "marks": current_m,
-                        "source_type": "textbook",
-                        "chapter": "उपयोजित लेखन",
-                        "source_page": "",
-                        "source_confidence": "high",
-                        "answer": w_item["answer"],
-                        "passage": w_item["passage"],
-                        "is_poem": False,
-                        "sub_questions": []
-                    }
-                    is_dup, _ = is_duplicate_question(candidate_q, used_questions)
-                    if not is_dup:
-                        chosen_w = w_item
-                        writing_used_indices.add(idx)
-                        used_genres.add(genre)
-                        q_obj = candidate_q
-                        break
-
-                # Pass 2: any unused non-duplicate topic
-                if not q_obj:
-                    for idx in candidate_indices:
+                    writing_used_indices.add(idx)
+                    selected_w = w_item
+                    break
+                
+                # Pass 2: Any unused item
+                if not selected_w:
+                    for idx, w_item in enumerate(writing_pool):
                         if idx in writing_used_indices:
                             continue
-                        w_item = WRITING_POOL[idx]
-                        candidate_q = {
-                            "question_number": q_num_label,
-                            "question_text": w_item["title"],
-                            "marks": current_m,
-                            "source_type": "textbook",
-                            "chapter": "उपयोजित लेखन",
-                            "source_page": "",
-                            "source_confidence": "high",
-                            "answer": w_item["answer"],
-                            "passage": w_item["passage"],
-                            "is_poem": False,
-                            "sub_questions": []
-                        }
-                        is_dup, _ = is_duplicate_question(candidate_q, used_questions)
-                        if not is_dup:
-                            chosen_w = w_item
-                            writing_used_indices.add(idx)
-                            used_genres.add(w_item.get("genre", w_item["type"]))
-                            q_obj = candidate_q
-                            break
-
-                if not chosen_w or not q_obj:
+                        writing_used_indices.add(idx)
+                        selected_w = w_item
+                        break
+                        
+                if not selected_w:
+                    selected_w = writing_pool[w_idx % len(writing_pool)]
+                    
+                q_obj = {
+                    "id": str(uuid.uuid4()),
+                    "question_number": q_num_label,
+                    "question_text": selected_w["title"],
+                    "marks": current_w_marks,
+                    "source_type": "textbook",
+                    "class_name": grade,
+                    "textbook": book_title,
+                    "chapter": "उपयोजित लेखन",
+                    "source_page": "",
+                    "source_confidence": "high",
+                    "answer": selected_w["answer"],
+                    "passage": selected_w["passage"],
+                    "is_poem": False,
+                    "sub_questions": []
+                }
+                is_dup, reason = is_duplicate_question(q_obj, used_questions)
+                if is_dup:
                     raise ValueError("इस विभाग में पर्याप्त अलग-अलग प्रश्न उपलब्ध नहीं हैं। कृपया अधिक अध्याय चुनें या प्रश्नों की संख्या कम करें।")
-
                 used_questions.append(q_obj)
                 questions.append(q_obj)
 
         else:
+            # Default section handler
             q_obj = {
+                "id": str(uuid.uuid4()),
                 "question_number": f"प्रश्न {s_num}.",
-                "question_text": f"{s_title} पर आधारित प्रश्न :",
+                "question_text": "निर्देशानुसार उत्तर लिखिए :",
                 "marks": s_marks,
                 "source_type": "textbook",
-                "chapter": primary_chapter,
+                "class_name": grade,
+                "textbook": book_title,
+                "chapter": primary_chapter if 'primary_chapter' in locals() else "पाठ्यपुस्तक",
                 "source_page": "",
                 "source_confidence": "high",
-                "answer": "उचित उत्तर",
+                "answer": "उत्तर",
                 "passage": "",
                 "is_poem": False,
                 "sub_questions": []
             }
-            is_dup, reason = is_duplicate_question(q_obj, used_questions)
-            if is_dup:
-                raise ValueError("इस विभाग में पर्याप्त अलग-अलग प्रश्न उपलब्ध नहीं हैं। कृपया अधिक अध्याय चुनें या प्रश्नों की संख्या कम करें।")
-            used_questions.append(q_obj)
             questions.append(q_obj)
-            
+
         sections_data.append({
             "section_number": s_num,
             "section_title": s_title,
@@ -717,26 +742,28 @@ def generate_curriculum_paper_fallback(
             "questions": questions
         })
 
+    # Validate complete uniqueness across the paper
+    dup_errors = validate_paper_question_uniqueness(sections_data)
+    if dup_errors:
+        raise ValueError(f"Question uniqueness validation failed: {'; '.join(dup_errors)}")
+
     paper_result = {
+        "school_name": metadata.get("school_name", "TRINITY HIGH SCHOOL & JUNIOR COLLEGE"),
+        "exam_title": metadata.get("exam_title", "प्रथम घटक चाचणी"),
+        "total_marks": total_marks,
+        "duration": metadata.get("duration", "२ घंटे"),
+        "subject": metadata.get("subject", f"हिंदी ({book_title})"),
         "metadata": {
-            "class": str(metadata.get("class_name", "10")),
-            "subject": metadata.get("subject", "हिंदी (लोकभारती)"),
-            "book": metadata.get("book", "हिंदी लोकभारती"),
-            "exam_type": metadata.get("exam_type", "प्रथम घटक चाचणी"),
-            "duration": metadata.get("duration", "२ घंटे"),
-            "total_marks": total_marks,
-            "difficulty": metadata.get("difficulty", "Medium"),
-            "school_name": metadata.get("school_name", "TRINITY HIGH SCHOOL & JUNIOR COLLEGE"),
-            "tagline": metadata.get("tagline", "KNOWLEDGE IS WISDOM"),
-            "exam_title": metadata.get("exam_title", "प्रथम घटक चाचणी (First Unit Test)")
+            **metadata,
+            "class_name": grade,
+            "book": book_title
         },
         "general_instructions": [
-            "सभी प्रश्न हल करना अनिवार्य है ।",
-            "दाहिनी ओर दिए गए अंक प्रश्नों के पूर्णांक दर्शाते हैं ।",
-            "सुवाच्य तथा शुद्ध लेखन अपेक्षित है ।"
+            "सभी प्रश्न अनिवार्य हैं।",
+            "आकृतियों में ही उत्तर लिखना आवश्यक है।",
+            "स्वच्छ और सुंदर हस्तलेख में लिखें।"
         ],
         "sections": sections_data,
-        "total_marks": total_marks,
         "warnings": []
     }
     
@@ -751,11 +778,23 @@ def regenerate_single_question(
     paper_data: Dict[str, Any],
     section_index: int,
     question_index: int,
-    selected_chapters: List[Dict[str, Any]] = None
+    question_id: Optional[str] = None,
+    class_name: Optional[str] = None,
+    textbook_id: Optional[int] = None,
+    selected_chapters: Optional[List[str]] = None,
+    section_title: Optional[str] = None,
+    question_type: Optional[str] = None,
+    marks: Optional[int] = None,
+    used_questions: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
-    Regenerates a single question in the paper, strictly excluding all other question
-    signatures currently in the paper from the replacement pool and preserving exact marks.
+    Regenerates a single question in the paper:
+    1. Uses Gemini 2.5 Flash if GEMINI_API_KEY is configured with temperature 0.7.
+    2. Fallbacks to authentic class-wise curriculum pools if AI unavailable.
+    3. Strictly excludes all questions already on the paper AND recently regenerated questions.
+    4. Eliminates ping-ponging and repeated 2-3 questions.
+    5. Raises exact Hindi error if pool exhausted:
+       'इस अध्याय में नया प्रश्न उपलब्ध नहीं है। कृपया अन्य अध्याय चुनें।'
     """
     sections = paper_data.get("sections", [])
     if section_index < 0 or section_index >= len(sections):
@@ -767,38 +806,150 @@ def regenerate_single_question(
         raise IndexError("अमान्य प्रश्न अनुक्रमणिका (question index)")
         
     old_q = questions[question_index]
-    target_marks = old_q.get("marks", 5)
-    s_title = sec.get("section_title", "")
+    target_marks = marks if marks is not None else old_q.get("marks", 5)
+    s_title = section_title or sec.get("section_title", "")
     q_num = old_q.get("question_number", f"प्रश्न {question_index + 1}.")
     
-    # Collect all OTHER questions in the paper to exclude them
-    other_questions = []
+    # Determine class and authentic content
+    raw_grade = class_name or old_q.get("class_name") or paper_data.get("metadata", {}).get("class_name") or paper_data.get("metadata", {}).get("class") or "10"
+    grade = normalize_grade(raw_grade)
+    class_data = get_class_content(grade)
+    book_title = class_data.get("book", "हिंदी पाठ्यपुस्तक")
+    
+    # Collect all excluded question signatures across entire paper + passed used_questions
+    excluded_texts: List[str] = list(used_questions or [])
+    other_questions_for_dup_check: List[Dict[str, Any]] = []
+    
     for s_i, s in enumerate(sections):
         for q_i, q in enumerate(s.get("questions", [])):
             if s_i == section_index and q_i == question_index:
+                # Add old_q to exclusions so it won't be picked again immediately
+                if q.get("chapter"):
+                    excluded_texts.append(q["chapter"])
+                if q.get("question_text"):
+                    excluded_texts.append(q["question_text"])
+                if q.get("passage"):
+                    excluded_texts.append(q["passage"])
+                for sub in q.get("sub_questions", []):
+                    if sub.get("sub_text"):
+                        excluded_texts.append(sub["sub_text"])
                 continue
-            other_questions.append(q)
-            
-    # Regenerate based on section type
+            other_questions_for_dup_check.append(q)
+            if q.get("chapter"):
+                excluded_texts.append(q["chapter"])
+            if q.get("question_text"):
+                excluded_texts.append(q["question_text"])
+            if q.get("passage"):
+                excluded_texts.append(q["passage"])
+            for sub in q.get("sub_questions", []):
+                if sub.get("sub_text"):
+                    excluded_texts.append(sub["sub_text"])
+                    
+    all_excluded_check: List[Dict[str, Any]] = list(other_questions_for_dup_check)
+    all_excluded_check.append(old_q)
+    for u_txt in (used_questions or []):
+        all_excluded_check.append({"question_text": u_txt, "passage": u_txt, "sub_questions": []})
+
+    # Normalized exclusion signatures
+    excluded_normalized = {normalize_question(t) for t in excluded_texts if t and len(t.strip()) > 3}
+
+    # Attempt AI Regeneration if Gemini API Key is available
+    api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
+    if api_key:
+        try:
+            client = genai.Client(api_key=api_key)
+            prompt = f"""
+Generate ONE completely new Hindi question for Maharashtra State Board Exam:
+- Class / Grade: {grade}
+- Book: {book_title}
+- Section: {s_title}
+- Question Number: {q_num}
+- Marks: {target_marks}
+- Chapter Context: {selected_chapters or old_q.get('chapter', '')}
+
+STRICT CONSTRAINTS:
+1. Marks must be EXACTLY {target_marks}. If subquestions are used, sum of subquestion marks must equal {target_marks}.
+2. DO NOT use any question similar to the following already used questions:
+{json.dumps(list(excluded_texts)[:20], ensure_ascii=False)}
+3. DO NOT generate rhyming words ('तुकांत शब्द').
+4. Return ONLY valid JSON matching this schema:
+{{
+  "question_number": "{q_num}",
+  "question_text": "...",
+  "marks": {target_marks},
+  "source_type": "textbook",
+  "class_name": "{grade}",
+  "textbook": "{book_title}",
+  "chapter": "...",
+  "source_page": "",
+  "source_confidence": "high",
+  "answer": "...",
+  "passage": "...",
+  "is_poem": true/false,
+  "sub_questions": [
+    {{"id": "uuid", "sub_number": "(1)", "sub_text": "...", "marks": 2, "items": [], "answer": "..."}}
+  ]
+}}
+"""
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=GEMINI_SYSTEM_PROMPT,
+                    temperature=0.7,
+                    response_mime_type="application/json"
+                )
+            )
+            raw_ai = response.text.strip()
+            if raw_ai.startswith("```"):
+                raw_ai = re.sub(r"^```(?:json)?\s*\n?", "", raw_ai)
+                raw_ai = re.sub(r"\n?```\s*$", "", raw_ai)
+            cand_q = json.loads(raw_ai)
+            if isinstance(cand_q, list) and cand_q:
+                cand_q = cand_q[0]
+                
+            cand_q["question_number"] = q_num
+            cand_q["marks"] = target_marks
+            cand_q["class_name"] = grade
+            cand_q["textbook"] = book_title
+            if old_q.get("id"):
+                cand_q["id"] = old_q["id"]
+            else:
+                cand_q["id"] = str(uuid.uuid4())
+                
+            # Check duplicate against paper
+            is_dup, _ = is_duplicate_question(cand_q, other_questions_for_dup_check)
+            cand_norm = normalize_question(cand_q.get("question_text", "") + " " + cand_q.get("passage", "")[:40])
+            if not is_dup and cand_norm not in excluded_normalized:
+                return cand_q
+        except Exception:
+            # Fall back to class-wise pool below
+            pass
+
+    # Class-wise pool fallback
     if "व्याकरण" in s_title or "भाषा" in s_title:
-        # Build subquestions from GRAMMAR_POOL that do not duplicate anything in other_questions or old_q
+        grammar_pool = list(get_grammar_for_class(grade))
+        random.shuffle(grammar_pool)
+        
         candidate_subs = []
         allocated = 0
-        shuffled_pool = list(GRAMMAR_POOL)
-        random.shuffle(shuffled_pool)
         
-        excluded_grammar = other_questions + [old_q]
-        for g_item in shuffled_pool:
+        for g_item in grammar_pool:
+            cand_text = f"{g_item['type']} : {g_item['text']}"
+            cand_norm = normalize_question(cand_text)
+            if cand_norm in excluded_normalized:
+                continue
+                
             cand = {
                 "id": str(uuid.uuid4()),
                 "sub_number": f"({len(candidate_subs) + 1})",
-                "sub_text": f"{g_item['type']} : {g_item['text']}",
+                "sub_text": cand_text,
                 "marks": g_item["marks"],
                 "items": [],
                 "answer": g_item["answer"]
             }
             temp_q = {"question_text": cand["sub_text"], "sub_questions": []}
-            is_dup, _ = is_duplicate_question(temp_q, excluded_grammar)
+            is_dup, _ = is_duplicate_question(temp_q, other_questions_for_dup_check)
             if not is_dup and (allocated + g_item["marks"] <= target_marks):
                 candidate_subs.append(cand)
                 allocated += g_item["marks"]
@@ -808,11 +959,17 @@ def regenerate_single_question(
         if allocated < target_marks and candidate_subs:
             candidate_subs[-1]["marks"] += (target_marks - allocated)
             
+        if not candidate_subs:
+            raise ValueError("इस अध्याय में नया प्रश्न उपलब्ध नहीं है। कृपया अन्य अध्याय चुनें।")
+            
         new_q = {
+            "id": old_q.get("id") or str(uuid.uuid4()),
             "question_number": q_num,
             "question_text": "सूचनाओं के अनुसार कृतियाँ कीजिए :",
             "marks": target_marks,
             "source_type": "textbook",
+            "class_name": grade,
+            "textbook": book_title,
             "chapter": "भाषा अध्ययन",
             "source_page": "",
             "source_confidence": "high",
@@ -824,14 +981,21 @@ def regenerate_single_question(
         return new_q
 
     elif "लेखन" in s_title or "उपयोजित" in s_title:
-        shuffled_w = list(WRITING_POOL)
-        random.shuffle(shuffled_w)
-        for w_item in shuffled_w:
+        writing_pool = list(get_writing_for_class(grade))
+        random.shuffle(writing_pool)
+        
+        for w_item in writing_pool:
+            cand_norm = normalize_question(w_item["title"] + " " + w_item["passage"][:40])
+            if cand_norm in excluded_normalized:
+                continue
             new_q = {
+                "id": old_q.get("id") or str(uuid.uuid4()),
                 "question_number": q_num,
                 "question_text": w_item["title"],
                 "marks": target_marks,
                 "source_type": "textbook",
+                "class_name": grade,
+                "textbook": book_title,
                 "chapter": "उपयोजित लेखन",
                 "source_page": "",
                 "source_confidence": "high",
@@ -840,15 +1004,22 @@ def regenerate_single_question(
                 "is_poem": False,
                 "sub_questions": []
             }
-            is_dup, _ = is_duplicate_question(new_q, other_questions + [old_q])
+            is_dup, _ = is_duplicate_question(new_q, all_excluded_check)
             if not is_dup:
                 return new_q
-        raise ValueError("इस विभाग में पर्याप्त अलग-अलग प्रश्न उपलब्ध नहीं हैं। कृपया अधिक अध्याय चुनें या प्रश्नों की संख्या कम करें।")
+        raise ValueError("इस अध्याय में नया प्रश्न उपलब्ध नहीं है। कृपया अन्य अध्याय चुनें।")
 
     elif "पद्य" in s_title:
-        shuffled_p = list(POETRY_PASSAGES)
-        random.shuffle(shuffled_p)
-        for p_data in shuffled_p:
+        poetry_pool = list(get_poetry_for_class(grade, selected_chapters))
+        random.shuffle(poetry_pool)
+        
+        for p_data in poetry_pool:
+            if any(p_data["chapter"].strip().lower() == ex.strip().lower() for ex in excluded_texts if ex):
+                continue
+            cand_norm = normalize_question(p_data["chapter"] + " " + p_data["text"][:40])
+            if cand_norm in excluded_normalized:
+                continue
+                
             sub_q_list = []
             sub_alloc = 0
             for s_label, sub_info in enumerate(p_data["subs"]):
@@ -859,18 +1030,21 @@ def regenerate_single_question(
                         "sub_number": f"({s_label + 1})",
                         "sub_text": s_txt,
                         "marks": s_m,
-                        "items": ["१. ....................", "२. ...................."] if "संजाल" in s_txt or "उचित" in s_txt else [],
-                        "answer": ", ".join(s_ans)
+                        "items": ["१. ....................", "२. ...................."] if "संजाल" in s_txt or "उचित" in s_txt or "आकृति" in s_txt else [],
+                        "answer": ", ".join(s_ans) if isinstance(s_ans, list) else str(s_ans)
                     })
                     sub_alloc += s_m
             if sub_alloc < target_marks and sub_q_list:
                 sub_q_list[-1]["marks"] += (target_marks - sub_alloc)
                 
             new_q = {
+                "id": old_q.get("id") or str(uuid.uuid4()),
                 "question_number": q_num,
                 "question_text": "निम्नलिखित पठित पद्यांश पढ़कर सूचनाओं के अनुसार कृतियाँ कीजिए :",
                 "marks": target_marks,
                 "source_type": "textbook",
+                "class_name": grade,
+                "textbook": book_title,
                 "chapter": p_data["chapter"],
                 "source_page": "1",
                 "source_confidence": "high",
@@ -879,16 +1053,23 @@ def regenerate_single_question(
                 "is_poem": True,
                 "sub_questions": sub_q_list
             }
-            is_dup, _ = is_duplicate_question(new_q, other_questions + [old_q])
+            is_dup, _ = is_duplicate_question(new_q, all_excluded_check)
             if not is_dup:
                 return new_q
-        raise ValueError("इस विभाग में पर्याप्त अलग-अलग प्रश्न उपलब्ध नहीं हैं। कृपया अधिक अध्याय चुनें या प्रश्नों की संख्या कम करें।")
+        raise ValueError("इस अध्याय में नया प्रश्न उपलब्ध नहीं है। कृपया अन्य अध्याय चुनें।")
 
     else:
         # Default / Prose
-        shuffled_prose = list(PROSE_PASSAGES)
-        random.shuffle(shuffled_prose)
-        for passage_data in shuffled_prose:
+        prose_pool = list(get_prose_for_class(grade, selected_chapters))
+        random.shuffle(prose_pool)
+        
+        for passage_data in prose_pool:
+            if any(passage_data["chapter"].strip().lower() == ex.strip().lower() for ex in excluded_texts if ex):
+                continue
+            cand_norm = normalize_question(passage_data["chapter"] + " " + passage_data["text"][:40])
+            if cand_norm in excluded_normalized:
+                continue
+                
             sub_q_list = []
             sub_alloc = 0
             for s_label, sub_info in enumerate(passage_data["subs"]):
@@ -899,18 +1080,21 @@ def regenerate_single_question(
                         "sub_number": f"({s_label + 1})",
                         "sub_text": s_txt,
                         "marks": s_m,
-                        "items": ["१. ....................", "२. ...................."] if "संजाल" in s_txt or "आकृति" in s_txt else [],
-                        "answer": ", ".join(s_ans)
+                        "items": ["१. ....................", "२. ...................."] if "संजाल" in s_txt or "आकृति" in s_txt or "तालिका" in s_txt else [],
+                        "answer": ", ".join(s_ans) if isinstance(s_ans, list) else str(s_ans)
                     })
                     sub_alloc += s_m
             if sub_alloc < target_marks and sub_q_list:
                 sub_q_list[-1]["marks"] += (target_marks - sub_alloc)
                 
             new_q = {
+                "id": old_q.get("id") or str(uuid.uuid4()),
                 "question_number": q_num,
                 "question_text": "निम्नलिखित पठित गद्यांश पढ़कर सूचनाओं के अनुसार कृतियाँ कीजिए :",
                 "marks": target_marks,
                 "source_type": "textbook",
+                "class_name": grade,
+                "textbook": book_title,
                 "chapter": passage_data["chapter"],
                 "source_page": "1",
                 "source_confidence": "high",
@@ -919,23 +1103,31 @@ def regenerate_single_question(
                 "is_poem": False,
                 "sub_questions": sub_q_list
             }
-            is_dup, _ = is_duplicate_question(new_q, other_questions + [old_q])
+            is_dup, _ = is_duplicate_question(new_q, all_excluded_check)
             if not is_dup:
                 return new_q
                 
-        raise ValueError("इस विभाग में पर्याप्त अलग-अलग प्रश्न उपलब्ध नहीं हैं। कृपया अधिक अध्याय चुनें या प्रश्नों की संख्या कम करें।")
+        raise ValueError("इस अध्याय में नया प्रश्न उपलब्ध नहीं है। कृपया अन्य अध्याय चुनें।")
 
 
 def regenerate_single_subquestion(
     paper_data: Dict[str, Any],
     section_index: int,
     question_index: int,
-    subquestion_index: int
+    subquestion_index: int,
+    subquestion_id: Optional[str] = None,
+    class_name: Optional[str] = None,
+    textbook_id: Optional[int] = None,
+    selected_chapters: Optional[List[str]] = None,
+    section_title: Optional[str] = None,
+    question_type: Optional[str] = None,
+    marks: Optional[int] = None,
+    used_questions: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Regenerates a single subquestion within a question, maintaining exact marks and
     ensuring it does not duplicate any other subquestion or question in the paper,
-    nor the subquestion being replaced.
+    nor any question in used_questions or the subquestion being replaced.
     """
     sections = paper_data.get("sections", [])
     if section_index < 0 or section_index >= len(sections):
@@ -952,30 +1144,43 @@ def regenerate_single_subquestion(
         raise IndexError("अमान्य उपप्रश्न अनुक्रमणिका (subquestion index)")
         
     old_sub = subs[subquestion_index]
-    target_marks = old_sub.get("marks", 1)
-    s_title = sec.get("section_title", "")
+    target_marks = marks if marks is not None else old_sub.get("marks", 1)
+    s_title = section_title or sec.get("section_title", "")
     old_norm = normalize_question(old_sub.get("sub_text", ""))
     
-    # Collect all other question and subquestion objects in paper for duplicate detection
-    other_items = []
+    raw_grade = class_name or q.get("class_name") or paper_data.get("metadata", {}).get("class_name") or "10"
+    grade = normalize_grade(raw_grade)
+    class_data = get_class_content(grade)
+    
+    # Collect all other items in the paper + passed used_questions
+    excluded_texts: List[str] = list(used_questions or [])
+    other_items: List[Dict[str, Any]] = []
+    
     for s_i, s in enumerate(sections):
         for q_i, q_item in enumerate(s.get("questions", [])):
             if q_item.get("question_text"):
                 other_items.append({"question_text": q_item["question_text"], "sub_questions": []})
+                excluded_texts.append(q_item["question_text"])
             for sub_i, sub_item in enumerate(q_item.get("sub_questions", [])):
                 if s_i == section_index and q_i == question_index and sub_i == subquestion_index:
+                    if sub_item.get("sub_text"):
+                        excluded_texts.append(sub_item["sub_text"])
                     continue
                 if sub_item.get("sub_text"):
                     other_items.append({"question_text": sub_item["sub_text"], "sub_questions": []})
+                    excluded_texts.append(sub_item["sub_text"])
                     
-    # Look for candidate replacement based on section type
+    excluded_normalized = {normalize_question(t) for t in excluded_texts if t and len(t.strip()) > 3}
+    excluded_normalized.add(old_norm)
+    
     new_sub = None
     if "व्याकरण" in s_title or "भाषा" in s_title:
-        shuffled_g = list(GRAMMAR_POOL)
-        random.shuffle(shuffled_g)
-        for g_item in shuffled_g:
+        grammar_pool = list(get_grammar_for_class(grade))
+        random.shuffle(grammar_pool)
+        for g_item in grammar_pool:
             c_text = f"{g_item['type']} : {g_item['text']}"
-            if normalize_question(c_text) == old_norm:
+            c_norm = normalize_question(c_text)
+            if c_norm in excluded_normalized:
                 continue
             temp_q = {"question_text": c_text, "sub_questions": []}
             is_dup, _ = is_duplicate_question(temp_q, other_items)
@@ -991,15 +1196,18 @@ def regenerate_single_subquestion(
                 break
 
     elif "पद्य" in s_title:
-        matching_p = [p for p in POETRY_PASSAGES if (q.get("chapter") and q["chapter"] in p.get("chapter", "")) or (q.get("passage") and p.get("text", "")[:30] in q.get("passage", ""))]
-        other_p = [p for p in POETRY_PASSAGES if p not in matching_p]
+        poetry_pool = list(get_poetry_for_class(grade, selected_chapters))
+        matching_p = [p for p in poetry_pool if (q.get("chapter") and q["chapter"] in p.get("chapter", "")) or (q.get("passage") and p.get("text", "")[:30] in q.get("passage", ""))]
+        other_p = [p for p in poetry_pool if p not in matching_p]
+        random.shuffle(matching_p)
         random.shuffle(other_p)
         ordered_poetry = matching_p + other_p
         for p_data in ordered_poetry:
             shuffled_subs = list(p_data["subs"])
             random.shuffle(shuffled_subs)
             for s_txt, s_m, s_ans in shuffled_subs:
-                if normalize_question(s_txt) == old_norm:
+                s_norm = normalize_question(s_txt)
+                if s_norm in excluded_normalized:
                     continue
                 temp_q = {"question_text": s_txt, "sub_questions": []}
                 is_dup, _ = is_duplicate_question(temp_q, other_items)
@@ -1017,16 +1225,19 @@ def regenerate_single_subquestion(
                 break
 
     else:
-        # Prose / General subquestions - prioritize matching chapter/passage first
-        matching_pr = [p for p in PROSE_PASSAGES if (q.get("chapter") and q["chapter"] in p.get("chapter", "")) or (q.get("passage") and p.get("text", "")[:30] in q.get("passage", ""))]
-        other_pr = [p for p in PROSE_PASSAGES if p not in matching_pr]
+        # Prose / General
+        prose_pool = list(get_prose_for_class(grade, selected_chapters))
+        matching_pr = [p for p in prose_pool if (q.get("chapter") and q["chapter"] in p.get("chapter", "")) or (q.get("passage") and p.get("text", "")[:30] in q.get("passage", ""))]
+        other_pr = [p for p in prose_pool if p not in matching_pr]
+        random.shuffle(matching_pr)
         random.shuffle(other_pr)
         ordered_passages = matching_pr + other_pr
         for pr_data in ordered_passages:
             shuffled_subs = list(pr_data["subs"])
             random.shuffle(shuffled_subs)
             for s_txt, s_m, s_ans in shuffled_subs:
-                if normalize_question(s_txt) == old_norm:
+                s_norm = normalize_question(s_txt)
+                if s_norm in excluded_normalized:
                     continue
                 temp_q = {"question_text": s_txt, "sub_questions": []}
                 is_dup, _ = is_duplicate_question(temp_q, other_items)
@@ -1044,8 +1255,7 @@ def regenerate_single_subquestion(
                 break
                 
     if not new_sub:
-        raise ValueError("इस उपप्रश्न के लिए कोई नया अद्वितीय विकल्प उपलब्ध नहीं है।")
+        raise ValueError("इस अध्याय में नया प्रश्न उपलब्ध नहीं है। कृपया अन्य अध्याय चुनें।")
         
     subs[subquestion_index] = new_sub
     return paper_data
-

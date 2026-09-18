@@ -64,6 +64,9 @@ def get_question_signature(question: Union[Dict[str, Any], str]) -> str:
         if st:
             parts.append(normalize_question(st))
             
+    if not question.get("sub_questions") and question.get("passage"):
+        parts.append(normalize_question(str(question.get("passage", ""))[:150]))
+
     return " | ".join(parts)
 
 def compute_similarity(tokens1: Set[str], tokens2: Set[str]) -> float:
@@ -135,7 +138,8 @@ def validate_paper_question_uniqueness(paper_data: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
     seen_questions: List[Dict[str, Any]] = []
     
-    for s_idx, section in enumerate(paper_data.get("sections", [])):
+    sections = paper_data if isinstance(paper_data, list) else paper_data.get("sections", [])
+    for s_idx, section in enumerate(sections):
         s_title = section.get("section_title", f"विभाग {s_idx + 1}")
         for q in section.get("questions", []):
             q_num = q.get("question_number", "प्रश्न")
