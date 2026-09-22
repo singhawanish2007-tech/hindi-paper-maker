@@ -1,6 +1,7 @@
 import os
 import gc
 import re
+import subprocess
 import urllib.request
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -68,7 +69,7 @@ def get_tessdata_path() -> Optional[str]:
 
     return str(target_dir) if target_dir.exists() else None
 
-def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 100, tessdata_dir: str = "") -> tuple[str, list]:
+def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 85, tessdata_dir: str = "") -> tuple[str, list]:
     """
     Directly invokes tesseract CLI to OCR a page image and extract text blocks.
     Zero Python dlopen or C-extension crashes. Supports PDF, TXT, and stdout fallbacks.
@@ -146,7 +147,7 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 100, tessdat
 
     return "", []
 
-def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 100, tessdata_dir: str = "") -> tuple[str, list]:
+def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 85, tessdata_dir: str = "") -> tuple[str, list]:
     """
     Directly invokes pytesseract to extract text and layout blocks in-memory.
     """
@@ -167,7 +168,10 @@ def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 100, tessdata_
         del pix
         gc.collect()
 
-        data = pytesseract.image_to_data(img, lang="hin+eng", config=config, output_type=pytesseract.Output.DICT)
+        try:
+            data = pytesseract.image_to_data(img, lang="hin+eng", config=config, output_type=pytesseract.Output.DICT)
+        except Exception:
+            data = pytesseract.image_to_data(img, lang="hin", config=config, output_type=pytesseract.Output.DICT)
 
         lines_dict = {}
         n_boxes = len(data["text"])
@@ -214,7 +218,7 @@ def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 100, tessdata_
 
     return "", []
 
-def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessdata_dir: str = "", dpi: int = 100) -> tuple[str, list]:
+def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessdata_dir: str = "", dpi: int = 85) -> tuple[str, list]:
     """
     Safely retrieves page text and layout blocks using pytesseract, Tesseract CLI,
     PyMuPDF OCR (on Windows), or digital text fallback.
@@ -307,15 +311,15 @@ def build_editable_docx_from_blocks(doc: pymupdf.Document, output_docx_path: Pat
         if page_idx > 0:
             wdoc.add_page_break()
 
-        # Time budget: If already spent >40s on Render, switch to non-OCR for remaining pages
-        use_ocr_for_page = is_ocr and (time.time() - start_time < 40)
+        # Time budget: If already spent >75s on Render, switch to non-OCR for remaining pages
+        use_ocr_for_page = is_ocr and (time.time() - start_time < 75)
 
         raw_page_text, blocks = get_page_blocks_safe(
             page=page,
             page_idx=page_idx,
             is_ocr=use_ocr_for_page,
             tessdata_dir=tessdata_dir,
-            dpi=100
+            dpi=85
         )
 
         page_chars = len(raw_page_text.strip())
@@ -739,6 +743,28 @@ def convert_images_to_pdf(image_paths: List[Path], output_pdf_path: Path) -> Pat
     doc.close()
     return output_pdf_path
 
+def is_valid_converted_docx(docx_path: Path) -> bool:
+    """
+    Validates whether docx_path contains real extracted question paper content
+    and is not just an empty emergency fallback.
+    """
+    if not docx_path.exists() or docx_path.stat().st_size < 1000:
+        return False
+    try:
+        wdoc = docx.Document(str(docx_path))
+        lines = [p.text.strip() for p in wdoc.paragraphs if p.text and p.text.strip()]
+        real_content_lines = [
+            l for l in lines
+            if not l.startswith("[पृष्ठ")
+            and "स्कैन की गई प्रश्नपत्रिका" not in l
+            and "स्कैन की गई सामग्री" not in l
+            and "TRINITY HIGH SCHOOL" not in l
+            and "Hindi Paper" not in l
+        ]
+        return len(real_content_lines) >= 4 or len(wdoc.tables) >= 1
+    except Exception:
+        return False
+
 def create_emergency_fallback_docx(pdf_path: Path, output_docx_path: Path) -> Path:
     """
     Emergency generator guaranteeing a valid, editable DOCX is always created
@@ -794,11 +820,11 @@ def create_emergency_fallback_docx(pdf_path: Path, output_docx_path: Path) -> Pa
     wdoc.save(str(output_docx_path))
     return output_docx_path
 
-def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout: int = 50) -> Dict[str, Any]:
+def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout: int = 85) -> Dict[str, Any]:
     """
     Runs convert_pdf_to_docx in a separate process to guarantee memory isolation
     and protect the web server process from potential C-level library crashes or OOM.
-    Never exceeds 50 seconds, preventing Cloudflare 502/504 gateway timeouts.
+    Never exceeds 85 seconds, preventing Cloudflare 502/504 gateway timeouts.
     """
     import subprocess
     import json

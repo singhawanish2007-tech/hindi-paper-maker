@@ -16,7 +16,8 @@ from app.services.document_converter import (
     convert_pdf_to_docx_isolated,
     convert_docx_to_html,
     convert_docx_to_pdf,
-    convert_images_to_pdf
+    convert_images_to_pdf,
+    is_valid_converted_docx
 )
 
 router = APIRouter(prefix="/uploaded-papers", tags=["uploaded-papers"])
@@ -44,63 +45,6 @@ def paper_to_dict(p: UploadedPaper) -> dict:
         "created_at": p.created_at.isoformat() if p.created_at else ""
     }
 
-@router.get("/debug-ocr")
-def debug_ocr(db: Session = Depends(get_db)):
-    import subprocess
-    import shutil
-    import sys
-    import pymupdf
-    import pytesseract
-    from PIL import Image
-
-    res = {}
-    res["tesseract_which"] = shutil.which("tesseract")
-    res["tesseract_env"] = os.getenv("TESSERACT_PATH")
-    res["tessdata_prefix"] = os.getenv("TESSDATA_PREFIX")
-
-    try:
-        p = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=5)
-        res["version"] = (p.stdout or p.stderr).strip()
-    except Exception as e:
-        res["version_error"] = str(e)
-
-    try:
-        p = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True, timeout=5)
-        res["langs"] = (p.stdout or p.stderr).strip()
-    except Exception as e:
-        res["langs_error"] = str(e)
-
-    paper = db.query(UploadedPaper).first()
-    if paper and os.path.exists(paper.file_path):
-        doc = pymupdf.open(paper.file_path)
-        page0 = doc[0]
-        pix = page0.get_pixmap(dpi=72)
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        try:
-            txt = pytesseract.image_to_string(img, lang="hin")
-            res["pytesseract_test"] = txt[:300]
-        except Exception as e:
-            res["pytesseract_error"] = str(e)
-
-        test_out = settings.UPLOADED_PAPERS_DIR / "debug_test.docx"
-        cmd = [
-            sys.executable,
-            "-m",
-            "app.services.document_converter",
-            str(paper.file_path),
-            str(test_out)
-        ]
-        try:
-            sub = subprocess.run(cmd, capture_output=True, text=True, timeout=40, cwd=str(settings.BASE_DIR))
-            res["sub_returncode"] = sub.returncode
-            res["sub_stdout"] = sub.stdout[:400]
-            res["sub_stderr"] = sub.stderr[:400]
-        except Exception as e:
-            res["sub_error"] = str(e)
-        doc.close()
-
-    return res
-
 def background_convert_paper(paper_id: int):
     """
     Asynchronously pre-converts uploaded PDF/image to editable DOCX in the background.
@@ -118,7 +62,7 @@ def background_convert_paper(paper_id: int):
             return
 
         docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
-        if docx_out.exists() and docx_out.stat().st_size > 0:
+        if is_valid_converted_docx(docx_out):
             paper.converted_docx_path = str(docx_out)
             paper.conversion_status = "ready"
             db.commit()
@@ -137,9 +81,10 @@ def background_convert_paper(paper_id: int):
             src_pdf = pdf_out
             paper.converted_pdf_path = str(pdf_out)
 
-        res = convert_pdf_to_docx_isolated(src_pdf, docx_out)
+        res = convert_pdf_to_docx_isolated(src_pdf, docx_out, timeout=85)
         if docx_out.exists() and docx_out.stat().st_size > 0:
-            paper.converted_docx_path = str(docx_out)
+            if is_valid_converted_docx(docx_out):
+                paper.converted_docx_path = str(docx_out)
             paper.conversion_status = "ready"
             if res and isinstance(res, dict) and res.get("warning"):
                 paper.conversion_warning = res.get("warning")
@@ -216,12 +161,15 @@ def upload_papers(
             converted_pdf_path=converted_pdf_path,
             preview_html=None,
             file_size=file_size,
-            conversion_status="ready",
+            conversion_status="ready" if file_type == "docx" else "processing",
             conversion_warning="PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
         )
         db.add(paper_record)
         db.commit()
         db.refresh(paper_record)
+
+        if file_type in ["pdf", "image"]:
+            background_tasks.add_task(background_convert_paper, paper_record.id)
 
         created_records.append(paper_to_dict(paper_record))
 
@@ -276,11 +224,11 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
         download_ext = "docx"
         if paper.file_type == "docx" and os.path.exists(paper.file_path):
             target_path = Path(paper.file_path)
-        elif paper.converted_docx_path and os.path.exists(paper.converted_docx_path):
+        elif paper.converted_docx_path and is_valid_converted_docx(Path(paper.converted_docx_path)):
             target_path = Path(paper.converted_docx_path)
         elif paper.file_type in ["pdf", "image"] and os.path.exists(paper.file_path):
             docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
-            if docx_out.exists() and docx_out.stat().st_size > 0:
+            if is_valid_converted_docx(docx_out):
                 paper.converted_docx_path = str(docx_out)
                 target_path = docx_out
                 db.commit()
@@ -293,10 +241,12 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
                     src_pdf = pdf_out
                     paper.converted_pdf_path = str(pdf_out)
 
-                res = convert_pdf_to_docx_isolated(src_pdf, docx_out)
+                res = convert_pdf_to_docx_isolated(src_pdf, docx_out, timeout=85)
                 if docx_out.exists() and docx_out.stat().st_size > 0:
-                    paper.converted_docx_path = str(docx_out)
                     target_path = docx_out
+                    if is_valid_converted_docx(docx_out):
+                        paper.converted_docx_path = str(docx_out)
+                        paper.conversion_status = "ready"
                 if res and isinstance(res, dict) and res.get("warning"):
                     paper.conversion_warning = res.get("warning")
                 db.commit()
