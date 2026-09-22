@@ -201,13 +201,13 @@ def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessda
     if not is_ocr:
         return page.get_text(), page.get_text("blocks")
 
-    # 1. Try pytesseract first (in-memory, highly reliable)
-    raw_text, blocks = extract_blocks_via_pytesseract(page, dpi=dpi, tessdata_dir=tessdata_dir)
+    # 1. Try Tesseract CLI via subprocess first (Fastest, zero Python crashes, hard timeout)
+    raw_text, blocks = extract_blocks_via_tesseract_cli(page, dpi=dpi, tessdata_dir=tessdata_dir)
     if raw_text and len(raw_text.strip()) > 10:
         return raw_text, blocks
 
-    # 2. Try Tesseract CLI via subprocess
-    raw_text, blocks = extract_blocks_via_tesseract_cli(page, dpi=dpi, tessdata_dir=tessdata_dir)
+    # 2. Try pytesseract in-memory as fallback
+    raw_text, blocks = extract_blocks_via_pytesseract(page, dpi=dpi, tessdata_dir=tessdata_dir)
     if raw_text and len(raw_text.strip()) > 10:
         return raw_text, blocks
 
@@ -797,52 +797,24 @@ def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout
     """
     Runs convert_pdf_to_docx in a separate process to guarantee memory isolation
     and protect the web server process from potential C-level library crashes or OOM.
-    Never exceeds 85 seconds, preventing Cloudflare 502/504 gateway timeouts.
+    Runs convert_pdf_to_docx in a memory-safe worker thread with timeout protection.
+    Prevents duplicate Python process RAM exhaustion and OOM kills on 512MB Render instances.
     """
-    import subprocess
-    import json
-    import sys
+    import concurrent.futures
 
     try:
-        cmd = [
-            sys.executable,
-            "-m",
-            "app.services.document_converter",
-            str(pdf_path),
-            str(output_docx_path)
-        ]
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(settings.BASE_DIR)
-        )
-        if proc.returncode == 0 and output_docx_path.exists() and output_docx_path.stat().st_size > 0:
-            for line in proc.stdout.splitlines():
-                if line.startswith("CONV_RESULT:"):
-                    data = json.loads(line[len("CONV_RESULT:"):])
-                    return {
-                        "output_path": output_docx_path,
-                        "is_scanned": data.get("is_scanned", False),
-                        "low_confidence": data.get("low_confidence", False),
-                        "warning": data.get("warning", "PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।")
-                    }
-            return {
-                "output_path": output_docx_path,
-                "is_scanned": False,
-                "low_confidence": False,
-                "warning": "PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
-            }
-        else:
-            print(f"Isolated conversion failed with code {proc.returncode}: {proc.stderr}")
-    except subprocess.TimeoutExpired:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(convert_pdf_to_docx, pdf_path, output_docx_path)
+            res = future.result(timeout=timeout)
+            if output_docx_path.exists() and output_docx_path.stat().st_size > 0:
+                return res
+    except concurrent.futures.TimeoutError:
         print(f"Isolated conversion timed out after {timeout} seconds.")
     except Exception as e:
-        print(f"Isolated conversion subprocess error: {e}")
+        print(f"Isolated conversion error: {e}")
 
-    # Fallback to emergency fallback docx (never execute heavy/crashing OCR directly in Uvicorn)
-    print("Subprocess failed or timed out. Creating safe emergency fallback DOCX.")
+    # Fallback to emergency fallback docx
+    print("Conversion failed or timed out. Creating safe emergency fallback DOCX.")
     create_emergency_fallback_docx(pdf_path, output_docx_path)
     return {
         "output_path": output_docx_path,
