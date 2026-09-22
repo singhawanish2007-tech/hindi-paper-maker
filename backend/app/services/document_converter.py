@@ -35,12 +35,14 @@ import tempfile
 def get_tessdata_path() -> Optional[str]:
     """
     Locates or initializes the tessdata directory containing hin.traineddata.
+    On Linux system environments, returns empty string so Tesseract uses native paths.
     """
+    import sys
+    if sys.platform != "win32":
+        return ""
+
     candidates = [
         Path(os.getenv("TESSDATA_PREFIX", "")),
-        Path("/usr/share/tesseract-ocr/5/tessdata"),
-        Path("/usr/share/tesseract-ocr/4.00/tessdata"),
-        Path("/usr/share/tesseract-ocr/tessdata"),
         settings.TESSDATA_DIR,
         settings.BASE_DIR / "tessdata",
         Path(r"C:\Program Files\Tesseract-OCR\tessdata")
@@ -50,24 +52,7 @@ def get_tessdata_path() -> Optional[str]:
         if p and p.exists() and (p / "hin.traineddata").exists():
             return str(p)
 
-    # If missing, check if settings.TESSDATA_DIR exists
-    target_dir = settings.TESSDATA_DIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-    hin_path = target_dir / "hin.traineddata"
-    eng_path = target_dir / "eng.traineddata"
-
-    base_url = "https://github.com/tesseract-ocr/tessdata_fast/raw/main/"
-    try:
-        if not hin_path.exists() or hin_path.stat().st_size < 1000:
-            print("Downloading hin.traineddata for Hindi OCR...")
-            urllib.request.urlretrieve(base_url + "hin.traineddata", str(hin_path))
-        if not eng_path.exists() or eng_path.stat().st_size < 1000:
-            print("Downloading eng.traineddata for OCR...")
-            urllib.request.urlretrieve(base_url + "eng.traineddata", str(eng_path))
-    except Exception as e:
-        print(f"Warning: Could not download tessdata automatically: {e}")
-
-    return str(target_dir) if target_dir.exists() else None
+    return ""
 
 def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 72, tessdata_dir: str = "") -> tuple[str, list]:
     """
@@ -91,16 +76,14 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 72, tessdata
 
             # Primary: Fast TXT output without redundant color inversion
             cmd = [tess_bin, str(img_path), str(out_base)]
-            if tessdata_dir and os.path.exists(tessdata_dir):
-                cmd.extend(["--tessdata-dir", str(tessdata_dir)])
+            if tessdata_dir and os.path.exists(tessdata_dir) and tessdata_dir not in ["/usr/share/tesseract-ocr/5/tessdata", "/usr/share/tesseract-ocr/tessdata"]:
+                cmd.extend(["--tessdata-dir", tessdata_dir.strip('"\'')])
             cmd.extend(["-l", "hin+eng", "-c", "tessedit_do_invert=0", "txt"])
 
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
             if res.returncode != 0:
                 # Retry with only 'hin' if hin+eng failed
                 cmd_hin = [tess_bin, str(img_path), str(out_base), "-l", "hin", "-c", "tessedit_do_invert=0", "txt"]
-                if tessdata_dir and os.path.exists(tessdata_dir):
-                    cmd_hin.extend(["--tessdata-dir", str(tessdata_dir)])
                 res = subprocess.run(cmd_hin, capture_output=True, text=True, timeout=18)
 
             # Check generated TXT
@@ -109,7 +92,7 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 72, tessdata
                 with open(ocr_txt, "r", encoding="utf-8", errors="ignore") as f:
                     p_text = f.read().strip()
                 if p_text and len(p_text) > 10:
-                    lines = [l.strip() for l in p_text.splitlines() if l.strip()]
+                    lines = [clean_ocr_line(l) for l in p_text.splitlines() if clean_ocr_line(l)]
                     synthetic_blocks = []
                     y_pos = 50.0
                     for line in lines:
@@ -134,8 +117,9 @@ def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 72, tessdata_d
             pytesseract.pytesseract.tesseract_cmd = tess_bin
 
         config_parts = ["-c tessedit_do_invert=0"]
-        if tessdata_dir and os.path.exists(tessdata_dir):
-            config_parts.append(f'--tessdata-dir "{tessdata_dir}"')
+        if tessdata_dir and os.path.exists(tessdata_dir) and tessdata_dir not in ["/usr/share/tesseract-ocr/5/tessdata", "/usr/share/tesseract-ocr/tessdata"]:
+            clean_dir = tessdata_dir.strip('"\'')
+            config_parts.append(f"--tessdata-dir {clean_dir}")
         config = " ".join(config_parts)
 
         pix = page.get_pixmap(dpi=dpi)
@@ -143,10 +127,24 @@ def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 72, tessdata_d
         del pix
         gc.collect()
 
+        data = None
         try:
             data = pytesseract.image_to_data(img, lang="hin+eng", config=config, output_type=pytesseract.Output.DICT)
         except Exception:
-            data = pytesseract.image_to_data(img, lang="hin", config=config, output_type=pytesseract.Output.DICT)
+            try:
+                data = pytesseract.image_to_data(img, lang="hin", config=config, output_type=pytesseract.Output.DICT)
+            except Exception:
+                # Direct string fallback (proven to work on Render)
+                txt = pytesseract.image_to_string(img, lang="hin")
+                if txt and len(txt.strip()) > 10:
+                    lines = [clean_ocr_line(l) for l in txt.splitlines() if clean_ocr_line(l)]
+                    synthetic_blocks = []
+                    y_pos = 50.0
+                    for line in lines:
+                        synthetic_blocks.append((50.0, y_pos, 500.0, y_pos + 18.0, line, 0, 0))
+                        y_pos += 22.0
+                    return txt, synthetic_blocks
+                return "", []
 
         lines_dict = {}
         n_boxes = len(data["text"])
