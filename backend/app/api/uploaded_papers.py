@@ -97,13 +97,16 @@ def upload_papers(
         preview_html = None
         conversion_status = "ready"
 
+        conversion_warning = "PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
         try:
             if file_type == "pdf":
                 # Convert PDF -> DOCX
                 docx_out = settings.UPLOADED_PAPERS_DIR / f"{file_uuid}_converted.docx"
-                convert_pdf_to_docx(saved_path, docx_out)
+                res = convert_pdf_to_docx(saved_path, docx_out)
                 if docx_out.exists():
                     converted_docx_path = str(docx_out)
+                if res and isinstance(res, dict) and res.get("warning"):
+                    conversion_warning = res.get("warning")
             elif file_type == "docx":
                 # Convert DOCX -> PDF and generate HTML preview
                 preview_html = convert_docx_to_html(saved_path)
@@ -121,9 +124,11 @@ def upload_papers(
                 if pdf_out.exists():
                     converted_pdf_path = str(pdf_out)
                     docx_out = settings.UPLOADED_PAPERS_DIR / f"{file_uuid}_converted.docx"
-                    convert_pdf_to_docx(pdf_out, docx_out)
+                    res = convert_pdf_to_docx(pdf_out, docx_out)
                     if docx_out.exists():
                         converted_docx_path = str(docx_out)
+                    if res and isinstance(res, dict) and res.get("warning"):
+                        conversion_warning = res.get("warning")
         except Exception as e:
             print(f"Error during document conversion for {original_filename}: {e}")
             conversion_status = "partial"
@@ -140,7 +145,7 @@ def upload_papers(
             preview_html=preview_html,
             file_size=file_size,
             conversion_status=conversion_status,
-            conversion_warning="PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
+            conversion_warning=conversion_warning
         )
         db.add(paper_record)
         db.commit()
@@ -206,8 +211,10 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
         elif paper.file_type == "pdf" and os.path.exists(paper.file_path):
             # Convert on demand
             docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_demand.docx"
-            convert_pdf_to_docx(Path(paper.file_path), docx_out)
+            res = convert_pdf_to_docx(Path(paper.file_path), docx_out)
             paper.converted_docx_path = str(docx_out)
+            if res and isinstance(res, dict) and res.get("warning"):
+                paper.conversion_warning = res.get("warning")
             db.commit()
             target_path = docx_out
 

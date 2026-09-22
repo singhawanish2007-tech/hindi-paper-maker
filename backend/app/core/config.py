@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     EXPORTS_DIR: Path = STORAGE_DIR / "exports"
     ASSETS_DIR: Path = STORAGE_DIR / "assets"
     UPLOADED_PAPERS_DIR: Path = STORAGE_DIR / "uploaded_papers"
+    TESSDATA_DIR: Path = Path("/tmp/tessdata") if bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")) else BASE_DIR / "tessdata"
     
     # Database
     DATABASE_URL: str = os.getenv(
@@ -52,4 +53,5 @@ settings.TEXTBOOKS_DIR.mkdir(parents=True, exist_ok=True)
 settings.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 settings.ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 settings.UPLOADED_PAPERS_DIR.mkdir(parents=True, exist_ok=True)
+settings.TESSDATA_DIR.mkdir(parents=True, exist_ok=True)
 

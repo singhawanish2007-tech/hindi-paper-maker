@@ -322,9 +322,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       await uploadedPaperService.downloadPdf(up.id, name);
                     }}
                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                    title="मूल PDF डाउनलोड करें"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download PDF</span>
+                    <span>{t.downloadPaperPdf}</span>
                   </button>
 
                   <button
@@ -333,9 +334,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       await uploadedPaperService.downloadDocx(up.id, name);
                     }}
                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                    title="संपादन योग्य Word (.docx) फ़ाइल डाउनलोड करें"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download Word</span>
+                    <span>{t.downloadPaperWord}</span>
                   </button>
                 </div>
               </div>
@@ -411,8 +413,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Download PDF</span>
-                  <span className="sm:hidden">PDF</span>
+                  <span className="hidden sm:inline">{t.downloadPaperPdf}</span>
+                  <span className="sm:hidden">Original PDF</span>
                 </button>
 
                 <button
@@ -423,8 +425,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Download Word</span>
-                  <span className="sm:hidden">Word</span>
+                  <span className="hidden sm:inline">{t.downloadPaperWord}</span>
+                  <span className="sm:hidden">Editable Word</span>
                 </button>
 
                 <button

@@ -23,6 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-nakula \
     fonts-sahadeva \
     fonts-dejavu-core \
+    tesseract-ocr \
+    tesseract-ocr-hin \
+    tesseract-ocr-eng \
     chromium \
     libnss3 \
     libatk1.0-0 \
