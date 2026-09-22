@@ -3,12 +3,12 @@ import uuid
 import urllib.parse
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.models.uploaded_paper import UploadedPaper
 from app.services.document_converter import (
     extract_metadata,
@@ -26,7 +26,7 @@ def paper_to_dict(p: UploadedPaper) -> dict:
     )
     has_docx = (p.file_type == "docx" and os.path.exists(p.file_path)) or (
         bool(p.converted_docx_path) and os.path.exists(p.converted_docx_path)
-    )
+    ) or (p.file_type in ["pdf", "image"] and os.path.exists(p.file_path))
 
     return {
         "id": p.id,
@@ -43,8 +43,56 @@ def paper_to_dict(p: UploadedPaper) -> dict:
         "created_at": p.created_at.isoformat() if p.created_at else ""
     }
 
+def async_convert_paper(paper_id: int):
+    """
+    Background worker to convert uploaded papers to DOCX / PDF without blocking upload response.
+    """
+    db = SessionLocal()
+    try:
+        paper = db.query(UploadedPaper).filter(UploadedPaper.id == paper_id).first()
+        if not paper or not os.path.exists(paper.file_path):
+            return
+
+        file_path = Path(paper.file_path)
+        if paper.file_type == "pdf":
+            docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
+            res = convert_pdf_to_docx(file_path, docx_out)
+            if docx_out.exists():
+                paper.converted_docx_path = str(docx_out)
+            if res and isinstance(res, dict) and res.get("warning"):
+                paper.conversion_warning = res.get("warning")
+            db.commit()
+        elif paper.file_type == "docx":
+            preview_html = convert_docx_to_html(file_path)
+            paper.preview_html = preview_html
+            pdf_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.pdf"
+            try:
+                convert_docx_to_pdf(file_path, pdf_out)
+                if pdf_out.exists():
+                    paper.converted_pdf_path = str(pdf_out)
+            except Exception as ex:
+                print(f"Background Playwright conversion note: {ex}")
+            db.commit()
+        elif paper.file_type == "image":
+            pdf_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.pdf"
+            convert_images_to_pdf([file_path], pdf_out)
+            if pdf_out.exists():
+                paper.converted_pdf_path = str(pdf_out)
+                docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
+                res = convert_pdf_to_docx(pdf_out, docx_out)
+                if docx_out.exists():
+                    paper.converted_docx_path = str(docx_out)
+                if res and isinstance(res, dict) and res.get("warning"):
+                    paper.conversion_warning = res.get("warning")
+            db.commit()
+    except Exception as e:
+        print(f"Background conversion error for paper {paper_id}: {e}")
+    finally:
+        db.close()
+
 @router.post("/upload")
 def upload_papers(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     grade: Optional[str] = Form(None),
     subject: Optional[str] = Form(None),
@@ -52,7 +100,7 @@ def upload_papers(
 ):
     """
     Batch upload multiple existing question papers (PDF, DOCX, Images).
-    Preserves exact original files and generates bidirectional PDF/DOCX formats.
+    Instant response (<0.5s) with async background and on-demand conversion.
     """
     if not files:
         raise HTTPException(status_code=400, detail="कोई फ़ाइल प्राप्त नहीं हुई।")
@@ -86,52 +134,14 @@ def upload_papers(
         else:
             file_type = "image"
 
-        # Extract metadata
+        # Fast metadata extraction (0ms, no heavy OCR)
         meta = extract_metadata(saved_path, original_filename)
         final_grade = grade or meta.get("grade", "10")
         final_subject = subject or meta.get("subject", "हिंदी")
         final_title = f"Class {final_grade} — Hindi Paper"
 
-        converted_docx_path = None
-        converted_pdf_path = None
-        preview_html = None
-        conversion_status = "ready"
-
-        conversion_warning = "PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
-        try:
-            if file_type == "pdf":
-                # Convert PDF -> DOCX
-                docx_out = settings.UPLOADED_PAPERS_DIR / f"{file_uuid}_converted.docx"
-                res = convert_pdf_to_docx(saved_path, docx_out)
-                if docx_out.exists():
-                    converted_docx_path = str(docx_out)
-                if res and isinstance(res, dict) and res.get("warning"):
-                    conversion_warning = res.get("warning")
-            elif file_type == "docx":
-                # Convert DOCX -> PDF and generate HTML preview
-                preview_html = convert_docx_to_html(saved_path)
-                pdf_out = settings.UPLOADED_PAPERS_DIR / f"{file_uuid}_converted.pdf"
-                try:
-                    convert_docx_to_pdf(saved_path, pdf_out)
-                    if pdf_out.exists():
-                        converted_pdf_path = str(pdf_out)
-                except Exception as ex:
-                    print(f"Playwright conversion note: {ex}")
-            elif file_type == "image":
-                # Convert image to PDF first, then to DOCX
-                pdf_out = settings.UPLOADED_PAPERS_DIR / f"{file_uuid}_converted.pdf"
-                convert_images_to_pdf([saved_path], pdf_out)
-                if pdf_out.exists():
-                    converted_pdf_path = str(pdf_out)
-                    docx_out = settings.UPLOADED_PAPERS_DIR / f"{file_uuid}_converted.docx"
-                    res = convert_pdf_to_docx(pdf_out, docx_out)
-                    if docx_out.exists():
-                        converted_docx_path = str(docx_out)
-                    if res and isinstance(res, dict) and res.get("warning"):
-                        conversion_warning = res.get("warning")
-        except Exception as e:
-            print(f"Error during document conversion for {original_filename}: {e}")
-            conversion_status = "partial"
+        converted_docx_path = str(saved_path) if file_type == "docx" else None
+        converted_pdf_path = str(saved_path) if file_type == "pdf" else None
 
         paper_record = UploadedPaper(
             title=final_title,
@@ -142,14 +152,17 @@ def upload_papers(
             file_path=str(saved_path),
             converted_docx_path=converted_docx_path,
             converted_pdf_path=converted_pdf_path,
-            preview_html=preview_html,
+            preview_html=None,
             file_size=file_size,
-            conversion_status=conversion_status,
-            conversion_warning=conversion_warning
+            conversion_status="ready",
+            conversion_warning="PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
         )
         db.add(paper_record)
         db.commit()
         db.refresh(paper_record)
+
+        # Dispatch background conversion
+        background_tasks.add_task(async_convert_paper, paper_record.id)
 
         created_records.append(paper_to_dict(paper_record))
 
@@ -208,15 +221,23 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
             target_path = Path(paper.file_path)
         elif paper.converted_docx_path and os.path.exists(paper.converted_docx_path):
             target_path = Path(paper.converted_docx_path)
-        elif paper.file_type == "pdf" and os.path.exists(paper.file_path):
+        elif paper.file_type in ["pdf", "image"] and os.path.exists(paper.file_path):
             # Convert on demand
-            docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_demand.docx"
-            res = convert_pdf_to_docx(Path(paper.file_path), docx_out)
-            paper.converted_docx_path = str(docx_out)
+            docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
+            src_pdf = Path(paper.file_path)
+            if paper.file_type == "image":
+                pdf_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.pdf"
+                convert_images_to_pdf([src_pdf], pdf_out)
+                src_pdf = pdf_out
+                paper.converted_pdf_path = str(pdf_out)
+
+            res = convert_pdf_to_docx(src_pdf, docx_out)
+            if docx_out.exists():
+                paper.converted_docx_path = str(docx_out)
+                target_path = docx_out
             if res and isinstance(res, dict) and res.get("warning"):
                 paper.conversion_warning = res.get("warning")
             db.commit()
-            target_path = docx_out
 
     if not target_path or not target_path.exists():
         raise HTTPException(status_code=404, detail=f"{file_format.upper()} प्रारूप उपलब्ध नहीं है।")

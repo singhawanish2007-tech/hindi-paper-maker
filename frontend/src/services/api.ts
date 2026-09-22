@@ -268,7 +268,6 @@ export const uploadedPaperService = {
     if (subject) formData.append("subject", subject);
 
     const res = await api.post<UploadedPaper[]>("/uploaded-papers/upload", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
       onUploadProgress: (progressEvent) => {
         if (progressEvent.total && onProgress) {
           const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);

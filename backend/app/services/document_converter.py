@@ -1,4 +1,5 @@
 import os
+import gc
 import re
 import urllib.request
 from pathlib import Path
@@ -26,16 +27,16 @@ def normalize_digits(text: str) -> str:
         text = text.replace(d, a)
     return text
 
-def get_tessdata_path() -> str:
+def get_tessdata_path() -> Optional[str]:
     """
     Locates or initializes the tessdata directory containing hin.traineddata.
     """
     candidates = [
+        Path("/usr/share/tesseract-ocr/5/tessdata"),
+        Path("/usr/share/tesseract-ocr/4.00/tessdata"),
         settings.TESSDATA_DIR,
         settings.BASE_DIR / "tessdata",
         Path(os.getenv("TESSDATA_PREFIX", "")),
-        Path("/usr/share/tesseract-ocr/5/tessdata"),
-        Path("/usr/share/tesseract-ocr/4.00/tessdata"),
         Path(r"C:\Program Files\Tesseract-OCR\tessdata")
     ]
 
@@ -43,7 +44,7 @@ def get_tessdata_path() -> str:
         if p and p.exists() and (p / "hin.traineddata").exists():
             return str(p)
 
-    # If missing, ensure directory and download hin.traineddata and eng.traineddata
+    # If missing, check if settings.TESSDATA_DIR exists
     target_dir = settings.TESSDATA_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     hin_path = target_dir / "hin.traineddata"
@@ -60,7 +61,7 @@ def get_tessdata_path() -> str:
     except Exception as e:
         print(f"Warning: Could not download tessdata automatically: {e}")
 
-    return str(target_dir)
+    return str(target_dir) if target_dir.exists() else None
 
 def is_scanned_pdf(doc: pymupdf.Document) -> bool:
     """
@@ -118,13 +119,26 @@ def build_editable_docx_from_blocks(doc: pymupdf.Document, output_docx_path: Pat
 
         if is_ocr:
             try:
-                tp = page.get_textpage_ocr(language="hin+eng", tessdata=tessdata_dir, dpi=300)
+                kwargs = {"language": "hin+eng", "dpi": 150}
+                if tessdata_dir and os.path.exists(tessdata_dir):
+                    kwargs["tessdata"] = tessdata_dir
+                tp = page.get_textpage_ocr(**kwargs)
                 raw_page_text = tp.extractText()
                 blocks = tp.extractBLOCKS()
+                del tp
+                gc.collect()
             except Exception as ex:
                 print(f"OCR error on page {page_idx}: {ex}")
-                raw_page_text = page.get_text()
-                blocks = page.get_text("blocks")
+                try:
+                    tp = page.get_textpage_ocr(language="hin", dpi=150)
+                    raw_page_text = tp.extractText()
+                    blocks = tp.extractBLOCKS()
+                    del tp
+                    gc.collect()
+                except Exception as ex2:
+                    print(f"OCR fallback error: {ex2}")
+                    raw_page_text = page.get_text()
+                    blocks = page.get_text("blocks")
         else:
             raw_page_text = page.get_text()
             blocks = page.get_text("blocks")
@@ -319,11 +333,6 @@ def extract_metadata(file_path: Path, filename: str) -> Dict[str, Any]:
             doc = pymupdf.open(file_path)
             for page in doc[:3]:
                 text_content += page.get_text() + "\n"
-            # If scanned PDF, run OCR on first page for metadata
-            if len(text_content.strip()) < 25 and len(doc) > 0:
-                tess_dir = get_tessdata_path()
-                tp = doc[0].get_textpage_ocr(language="hin+eng", tessdata=tess_dir, dpi=200)
-                text_content = tp.extractText()
             doc.close()
         except Exception as e:
             print(f"Error reading PDF text for metadata: {e}")
