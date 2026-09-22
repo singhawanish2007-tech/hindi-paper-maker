@@ -44,6 +44,45 @@ def paper_to_dict(p: UploadedPaper) -> dict:
         "created_at": p.created_at.isoformat() if p.created_at else ""
     }
 
+@router.get("/debug-ocr")
+def debug_ocr():
+    import subprocess
+    import shutil
+    res = {}
+    res["tesseract_which"] = shutil.which("tesseract")
+    res["tesseract_env"] = os.getenv("TESSERACT_PATH")
+    res["tessdata_prefix"] = os.getenv("TESSDATA_PREFIX")
+
+    try:
+        p = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=5)
+        res["version"] = (p.stdout or p.stderr).strip()
+    except Exception as e:
+        res["version_error"] = str(e)
+
+    try:
+        p = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True, timeout=5)
+        res["langs"] = (p.stdout or p.stderr).strip()
+    except Exception as e:
+        res["langs_error"] = str(e)
+
+    paths_to_check = [
+        "/usr/share/tesseract-ocr/5/tessdata",
+        "/usr/share/tesseract-ocr/4.00/tessdata",
+        "/usr/share/tesseract-ocr/tessdata",
+        "/usr/share/tessdata",
+        str(settings.BASE_DIR / "tessdata"),
+        str(settings.TESSDATA_DIR)
+    ]
+    res["directory_contents"] = {}
+    for pt in paths_to_check:
+        p_obj = Path(pt)
+        if p_obj.exists():
+            res["directory_contents"][pt] = [f.name for f in p_obj.iterdir()][:15]
+        else:
+            res["directory_contents"][pt] = "DOES_NOT_EXIST"
+
+    return res
+
 def background_convert_paper(paper_id: int):
     """
     Asynchronously pre-converts uploaded PDF/image to editable DOCX in the background.

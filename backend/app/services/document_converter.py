@@ -146,9 +146,77 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 100, tessdat
 
     return "", []
 
+def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 100, tessdata_dir: str = "") -> tuple[str, list]:
+    """
+    Directly invokes pytesseract to extract text and layout blocks in-memory.
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+
+        tess_bin = shutil.which("tesseract") or os.getenv("TESSERACT_PATH") or "/usr/bin/tesseract"
+        if os.path.exists(tess_bin):
+            pytesseract.pytesseract.tesseract_cmd = tess_bin
+
+        config = ""
+        if tessdata_dir and os.path.exists(tessdata_dir):
+            config = f'--tessdata-dir "{tessdata_dir}"'
+
+        pix = page.get_pixmap(dpi=dpi)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        del pix
+        gc.collect()
+
+        data = pytesseract.image_to_data(img, lang="hin+eng", config=config, output_type=pytesseract.Output.DICT)
+
+        lines_dict = {}
+        n_boxes = len(data["text"])
+        all_words = []
+        for i in range(n_boxes):
+            text = data["text"][i].strip()
+            if not text:
+                continue
+            all_words.append(text)
+            b_num = data["block_num"][i]
+            l_num = data["line_num"][i]
+            key = (b_num, l_num)
+            left = data["left"][i]
+            top = data["top"][i]
+            width = data["width"][i]
+            height = data["height"][i]
+
+            if key not in lines_dict:
+                lines_dict[key] = {
+                    "words": [text],
+                    "x0": left,
+                    "y0": top,
+                    "x1": left + width,
+                    "y1": top + height
+                }
+            else:
+                lines_dict[key]["words"].append(text)
+                lines_dict[key]["x0"] = min(lines_dict[key]["x0"], left)
+                lines_dict[key]["y0"] = min(lines_dict[key]["y0"], top)
+                lines_dict[key]["x1"] = max(lines_dict[key]["x1"], left + width)
+                lines_dict[key]["y1"] = max(lines_dict[key]["y1"], top + height)
+
+        raw_text = " ".join(all_words)
+        blocks = []
+        for k, v in sorted(lines_dict.items(), key=lambda item: (item[1]["y0"], item[1]["x0"])):
+            line_str = " ".join(v["words"]).strip()
+            if line_str:
+                blocks.append((v["x0"], v["y0"], v["x1"], v["y1"], line_str, 0, 0))
+
+        if raw_text and len(raw_text.strip()) > 10:
+            return raw_text, blocks
+    except Exception as e:
+        print(f"pytesseract extraction error: {e}")
+
+    return "", []
+
 def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessdata_dir: str = "", dpi: int = 100) -> tuple[str, list]:
     """
-    Safely retrieves page text and layout blocks using Tesseract CLI (on Linux),
+    Safely retrieves page text and layout blocks using pytesseract, Tesseract CLI,
     PyMuPDF OCR (on Windows), or digital text fallback.
     Guaranteed zero Python crashes or segmentation faults.
     """
@@ -156,31 +224,31 @@ def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessda
     if not is_ocr:
         return page.get_text(), page.get_text("blocks")
 
-    # On Linux (Docker/Render): ALWAYS use Tesseract CLI via subprocess to eliminate MuPDF dlopen C-level segfaults
-    if sys.platform != "win32":
-        raw_text, blocks = extract_blocks_via_tesseract_cli(page, dpi=dpi, tessdata_dir=tessdata_dir)
-        if raw_text and len(raw_text.strip()) > 10:
-            return raw_text, blocks
-        return page.get_text(), page.get_text("blocks")
+    # 1. Try pytesseract first (in-memory, highly reliable)
+    raw_text, blocks = extract_blocks_via_pytesseract(page, dpi=dpi, tessdata_dir=tessdata_dir)
+    if raw_text and len(raw_text.strip()) > 10:
+        return raw_text, blocks
 
-    # On Windows: Try Tesseract CLI first, then PyMuPDF embedded OCR
+    # 2. Try Tesseract CLI via subprocess
     raw_text, blocks = extract_blocks_via_tesseract_cli(page, dpi=dpi, tessdata_dir=tessdata_dir)
     if raw_text and len(raw_text.strip()) > 10:
         return raw_text, blocks
 
-    try:
-        kwargs = {"language": "hin+eng", "dpi": dpi}
-        if tessdata_dir and os.path.exists(tessdata_dir):
-            kwargs["tessdata"] = tessdata_dir
-        tp = page.get_textpage_ocr(**kwargs)
-        raw_text = tp.extractText()
-        blocks = tp.extractBLOCKS()
-        del tp
-        gc.collect()
-        if raw_text and len(raw_text.strip()) > 10:
-            return raw_text, blocks
-    except Exception as ex:
-        print(f"PyMuPDF OCR error on Windows page {page_idx}: {ex}")
+    # 3. On Windows only: Try PyMuPDF embedded OCR
+    if sys.platform == "win32":
+        try:
+            kwargs = {"language": "hin+eng", "dpi": dpi}
+            if tessdata_dir and os.path.exists(tessdata_dir):
+                kwargs["tessdata"] = tessdata_dir
+            tp = page.get_textpage_ocr(**kwargs)
+            raw_text = tp.extractText()
+            blocks = tp.extractBLOCKS()
+            del tp
+            gc.collect()
+            if raw_text and len(raw_text.strip()) > 10:
+                return raw_text, blocks
+        except Exception as ex:
+            print(f"PyMuPDF OCR error on Windows page {page_idx}: {ex}")
 
     return page.get_text(), page.get_text("blocks")
 
