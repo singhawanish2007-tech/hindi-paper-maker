@@ -13,6 +13,7 @@ from app.models.uploaded_paper import UploadedPaper
 from app.services.document_converter import (
     extract_metadata,
     convert_pdf_to_docx,
+    convert_pdf_to_docx_isolated,
     convert_docx_to_html,
     convert_docx_to_pdf,
     convert_images_to_pdf
@@ -43,56 +44,8 @@ def paper_to_dict(p: UploadedPaper) -> dict:
         "created_at": p.created_at.isoformat() if p.created_at else ""
     }
 
-def async_convert_paper(paper_id: int):
-    """
-    Background worker to convert uploaded papers to DOCX / PDF without blocking upload response.
-    """
-    db = SessionLocal()
-    try:
-        paper = db.query(UploadedPaper).filter(UploadedPaper.id == paper_id).first()
-        if not paper or not os.path.exists(paper.file_path):
-            return
-
-        file_path = Path(paper.file_path)
-        if paper.file_type == "pdf":
-            docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
-            res = convert_pdf_to_docx(file_path, docx_out)
-            if docx_out.exists():
-                paper.converted_docx_path = str(docx_out)
-            if res and isinstance(res, dict) and res.get("warning"):
-                paper.conversion_warning = res.get("warning")
-            db.commit()
-        elif paper.file_type == "docx":
-            preview_html = convert_docx_to_html(file_path)
-            paper.preview_html = preview_html
-            pdf_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.pdf"
-            try:
-                convert_docx_to_pdf(file_path, pdf_out)
-                if pdf_out.exists():
-                    paper.converted_pdf_path = str(pdf_out)
-            except Exception as ex:
-                print(f"Background Playwright conversion note: {ex}")
-            db.commit()
-        elif paper.file_type == "image":
-            pdf_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.pdf"
-            convert_images_to_pdf([file_path], pdf_out)
-            if pdf_out.exists():
-                paper.converted_pdf_path = str(pdf_out)
-                docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
-                res = convert_pdf_to_docx(pdf_out, docx_out)
-                if docx_out.exists():
-                    paper.converted_docx_path = str(docx_out)
-                if res and isinstance(res, dict) and res.get("warning"):
-                    paper.conversion_warning = res.get("warning")
-            db.commit()
-    except Exception as e:
-        print(f"Background conversion error for paper {paper_id}: {e}")
-    finally:
-        db.close()
-
 @router.post("/upload")
 def upload_papers(
-    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     grade: Optional[str] = Form(None),
     subject: Optional[str] = Form(None),
@@ -100,7 +53,8 @@ def upload_papers(
 ):
     """
     Batch upload multiple existing question papers (PDF, DOCX, Images).
-    Instant response (<0.5s) with async background and on-demand conversion.
+    Instant response (<0.5s) storing original files safely.
+    DOCX conversion runs on demand when requested.
     """
     if not files:
         raise HTTPException(status_code=400, detail="कोई फ़ाइल प्राप्त नहीं हुई।")
@@ -160,9 +114,6 @@ def upload_papers(
         db.add(paper_record)
         db.commit()
         db.refresh(paper_record)
-
-        # Dispatch background conversion
-        background_tasks.add_task(async_convert_paper, paper_record.id)
 
         created_records.append(paper_to_dict(paper_record))
 
@@ -231,7 +182,7 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
                 src_pdf = pdf_out
                 paper.converted_pdf_path = str(pdf_out)
 
-            res = convert_pdf_to_docx(src_pdf, docx_out)
+            res = convert_pdf_to_docx_isolated(src_pdf, docx_out)
             if docx_out.exists():
                 paper.converted_docx_path = str(docx_out)
                 target_path = docx_out

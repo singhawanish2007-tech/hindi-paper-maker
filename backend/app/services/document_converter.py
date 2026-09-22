@@ -554,3 +554,68 @@ def convert_images_to_pdf(image_paths: List[Path], output_pdf_path: Path) -> Pat
     doc.save(str(output_pdf_path))
     doc.close()
     return output_pdf_path
+
+def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout: int = 120) -> Dict[str, Any]:
+    """
+    Runs convert_pdf_to_docx in a separate process to guarantee memory isolation
+    and protect the web server process from potential C-level library crashes or OOM.
+    """
+    import subprocess
+    import json
+    import sys
+
+    try:
+        cmd = [
+            sys.executable,
+            "-m",
+            "app.services.document_converter",
+            str(pdf_path),
+            str(output_docx_path)
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(settings.BASE_DIR)
+        )
+        if proc.returncode == 0 and output_docx_path.exists() and output_docx_path.stat().st_size > 0:
+            for line in proc.stdout.splitlines():
+                if line.startswith("CONV_RESULT:"):
+                    data = json.loads(line[len("CONV_RESULT:"):])
+                    return {
+                        "output_path": output_docx_path,
+                        "is_scanned": data.get("is_scanned", False),
+                        "low_confidence": data.get("low_confidence", False),
+                        "warning": data.get("warning", "PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।")
+                    }
+            return {
+                "output_path": output_docx_path,
+                "is_scanned": False,
+                "low_confidence": False,
+                "warning": "PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
+            }
+        else:
+            print(f"Isolated conversion failed with code {proc.returncode}: {proc.stderr}")
+    except Exception as e:
+        print(f"Isolated conversion subprocess error: {e}")
+
+    # Fallback to direct conversion
+    return convert_pdf_to_docx(pdf_path, output_docx_path)
+
+if __name__ == "__main__":
+    import sys
+    import json
+    if len(sys.argv) >= 3:
+        in_pdf = Path(sys.argv[1])
+        out_docx = Path(sys.argv[2])
+        try:
+            res = convert_pdf_to_docx(in_pdf, out_docx)
+            print("CONV_RESULT:" + json.dumps({
+                "is_scanned": res.get("is_scanned", False),
+                "low_confidence": res.get("low_confidence", False),
+                "warning": res.get("warning", "")
+            }))
+        except Exception as err:
+            print(f"CONV_ERROR:{err}", file=sys.stderr)
+            sys.exit(1)
