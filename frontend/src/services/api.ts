@@ -5,7 +5,8 @@ import {
   PaperData,
   PaperSummary,
   BlueprintValidationResult,
-  AnswerKeyData
+  AnswerKeyData,
+  UploadedPaper
 } from "../types";
 
 // Read backend base URL from environment variable (for production deployment on Vercel)
@@ -244,6 +245,97 @@ export const paperService = {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(downloadUrl);
+  }
+};
+
+export const uploadedPaperService = {
+  async getAll(): Promise<UploadedPaper[]> {
+    const res = await api.get<UploadedPaper[]>("/uploaded-papers");
+    return res.data;
+  },
+
+  async uploadBatch(
+    files: File[],
+    grade?: string,
+    subject?: string,
+    onProgress?: (pct: number) => void
+  ): Promise<UploadedPaper[]> {
+    const formData = new FormData();
+    files.forEach((f) => {
+      formData.append("files", f);
+    });
+    if (grade) formData.append("grade", grade);
+    if (subject) formData.append("subject", subject);
+
+    const res = await api.post<UploadedPaper[]>("/uploaded-papers/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total && onProgress) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          onProgress(percent);
+        }
+      }
+    });
+    return res.data;
+  },
+
+  getPreviewUrl(id: number): string {
+    const base = API_BASE_URL ? `${API_BASE_URL}/api` : "/api";
+    return `${base}/uploaded-papers/${id}/preview`;
+  },
+
+  async getPreviewHtml(id: number): Promise<string> {
+    const res = await api.get<string>(`/uploaded-papers/${id}/preview-html`);
+    return res.data;
+  },
+
+  async downloadPdf(id: number, customFilename?: string): Promise<void> {
+    const url = `${API_BASE_URL ? API_BASE_URL : ""}/api/uploaded-papers/${id}/download/pdf`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`PDF download failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const filename = customFilename || `hindi-paper-class-${id}.pdf`;
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
+
+  async downloadDocx(id: number, customFilename?: string): Promise<void> {
+    const url = `${API_BASE_URL ? API_BASE_URL : ""}/api/uploaded-papers/${id}/download/docx`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Word DOCX download failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const filename = customFilename || `hindi-paper-class-${id}.docx`;
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
+
+  async update(id: number, data: { title?: string; grade?: string; subject?: string }): Promise<UploadedPaper> {
+    const formData = new FormData();
+    if (data.title) formData.append("title", data.title);
+    if (data.grade) formData.append("grade", data.grade);
+    if (data.subject) formData.append("subject", data.subject);
+    const res = await api.patch<UploadedPaper>(`/uploaded-papers/${id}`, formData);
+    return res.data;
+  },
+
+  async delete(id: number): Promise<void> {
+    await api.delete(`/uploaded-papers/${id}`);
   }
 };
 

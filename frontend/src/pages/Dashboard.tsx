@@ -9,10 +9,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  UploadCloud,
+  Eye,
+  X
 } from "lucide-react";
-import { Textbook, PaperSummary } from "../types";
-import { textbookService, paperService } from "../services/api";
+import { Textbook, PaperSummary, UploadedPaper } from "../types";
+import { textbookService, paperService, uploadedPaperService } from "../services/api";
 import { translations, Language } from "../services/translations";
 
 interface DashboardProps {
@@ -28,6 +31,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [textbooks, setTextbooks] = useState<Textbook[]>([]);
   const [papers, setPapers] = useState<PaperSummary[]>([]);
+  const [uploadedPapers, setUploadedPapers] = useState<UploadedPaper[]>([]);
+  const [previewPaper, setPreviewPaper] = useState<UploadedPaper | null>(null);
   const [loading, setLoading] = useState(true);
 
   const t = translations[lang] || translations.hi;
@@ -35,12 +40,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const loadData = async () => {
     try {
       setLoading(true);
-      const [tbList, pList] = await Promise.all([
+      const [tbList, pList, upList] = await Promise.all([
         textbookService.getAll(),
-        paperService.getAll()
+        paperService.getAll(),
+        uploadedPaperService.getAll().catch(() => [])
       ]);
       setTextbooks(tbList);
       setPapers(pList);
+      setUploadedPapers(upList);
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
     } finally {
@@ -87,6 +94,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {t.startGenerating}
             </button>
             <button
+              onClick={() => setCurrentTab("uploaded-papers")}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white/20 hover:bg-white/30 border border-white/30 text-white font-semibold text-sm rounded-xl transition-all cursor-pointer w-full sm:w-auto"
+            >
+              <UploadCloud className="w-4 h-4 text-white" />
+              {t.uploadExistingPaperBtn}
+            </button>
+            <button
               onClick={() => setCurrentTab("upload")}
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-800/60 hover:bg-blue-800/80 border border-blue-400/30 text-white font-medium text-sm rounded-xl transition-all cursor-pointer w-full sm:w-auto"
             >
@@ -98,7 +112,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* Quick Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3.5 sm:gap-4 min-w-0">
           <div className="p-3 bg-blue-50 text-blue-600 rounded-lg shrink-0">
             <BookOpen className="w-6 h-6" />
@@ -119,7 +133,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3.5 sm:gap-4 sm:col-span-2 lg:col-span-1 min-w-0">
+        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3.5 sm:gap-4 min-w-0">
+          <div className="p-3 bg-sky-50 text-sky-600 rounded-lg shrink-0">
+            <UploadCloud className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-2xl font-bold text-slate-800">{uploadedPapers.length}</div>
+            <div className="text-xs text-slate-500 truncate">{t.metricsUploaded}</div>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3.5 sm:gap-4 min-w-0">
           <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg shrink-0">
             <CheckCircle2 className="w-6 h-6" />
           </div>
@@ -223,6 +247,103 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
+      {/* Uploaded Existing Papers Section */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+          <div className="flex items-center gap-2">
+            <UploadCloud className="w-5 h-5 text-sky-600 shrink-0" />
+            <h2 className="font-bold text-sm sm:text-base text-slate-900 truncate">
+              {t.uploadedPapers} ({uploadedPapers.length})
+            </h2>
+          </div>
+          <button
+            onClick={() => setCurrentTab("uploaded-papers")}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer shrink-0"
+          >
+            <span>+ {t.uploadExistingPaperBtn}</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Warning Banner */}
+        <div className="bg-amber-50/80 px-4 sm:px-6 py-2 border-b border-amber-100 flex items-center gap-2 text-xs text-amber-800">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>{t.pdfToWordWarning}</span>
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {uploadedPapers.length === 0 ? (
+            <div className="p-6 text-center text-slate-500 text-xs sm:text-sm">
+              <p>{t.noUploadedPapers}</p>
+              <button
+                onClick={() => setCurrentTab("uploaded-papers")}
+                className="mt-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-lg transition-colors cursor-pointer"
+              >
+                + {t.uploadExistingPaperBtn}
+              </button>
+            </div>
+          ) : (
+            uploadedPapers.map((up) => (
+              <div
+                key={up.id}
+                className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 hover:bg-slate-50 transition-colors min-w-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-slate-900 text-sm sm:text-base">
+                      {up.title}
+                    </span>
+                    <span className="bg-indigo-50 text-indigo-700 text-2xs sm:text-xs px-2 py-0.5 rounded-full font-bold">
+                      {t.classLabel} {up.grade}
+                    </span>
+                    <span className="bg-slate-100 text-slate-600 text-2xs sm:text-xs px-2 py-0.5 rounded-full">
+                      {up.subject}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-2xs sm:text-xs text-slate-500 mt-1">
+                    <span>{up.original_filename}</span>
+                    <span>•</span>
+                    <span>{(up.file_size / 1024).toFixed(1)} KB</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setPreviewPaper(up)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>{t.previewBtn}</span>
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      const name = `${up.title.replace("—", "-").trim()}.pdf`;
+                      await uploadedPaperService.downloadPdf(up.id, name);
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PDF</span>
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      const name = `${up.title.replace("—", "-").trim()}.docx`;
+                      await uploadedPaperService.downloadDocx(up.id, name);
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Word</span>
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
       {/* Uploaded Textbooks Grid */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
@@ -263,6 +384,70 @@ export const Dashboard: React.FC<DashboardProps> = ({
           ))}
         </div>
       </div>
+
+      {/* Preview Modal */}
+      {previewPaper && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-5xl h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <FileText className="w-5 h-5 text-blue-600 shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="font-bold text-slate-900 text-sm sm:text-base truncate">
+                    {previewPaper.title}
+                  </h3>
+                  <p className="text-2xs sm:text-xs text-slate-500">
+                    {previewPaper.original_filename} • {t.classLabel} {previewPaper.grade}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={async () => {
+                    const name = `${previewPaper.title.replace("—", "-").trim()}.pdf`;
+                    await uploadedPaperService.downloadPdf(previewPaper.id, name);
+                  }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Download PDF</span>
+                  <span className="sm:hidden">PDF</span>
+                </button>
+
+                <button
+                  onClick={async () => {
+                    const name = `${previewPaper.title.replace("—", "-").trim()}.docx`;
+                    await uploadedPaperService.downloadDocx(previewPaper.id, name);
+                  }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Download Word</span>
+                  <span className="sm:hidden">Word</span>
+                </button>
+
+                <button
+                  onClick={() => setPreviewPaper(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer ml-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 bg-slate-100 p-2 sm:p-4 overflow-hidden flex flex-col">
+              <div className="flex-1 bg-white rounded-xl shadow-inner border border-slate-200 overflow-hidden relative">
+                <iframe
+                  src={uploadedPaperService.getPreviewUrl(previewPaper.id)}
+                  title="Document Preview"
+                  className="w-full h-full border-0"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

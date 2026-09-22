@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Navbar } from "./components/Navbar";
 import { Dashboard } from "./pages/Dashboard";
 import { TextbookUpload } from "./pages/TextbookUpload";
+import { UploadedPapers } from "./pages/UploadedPapers";
 import { PaperGenerator } from "./pages/PaperGenerator";
 import { CanvaPaperEditor } from "./pages/CanvaPaperEditor";
 import { AnswerKeyView } from "./pages/AnswerKeyView";
@@ -41,6 +42,13 @@ export const App: React.FC = () => {
             onUploadComplete={() => {
               setCurrentTab("generate");
             }}
+            lang={lang}
+          />
+        )}
+
+        {currentTab === "uploaded-papers" && (
+          <UploadedPapers
+            setCurrentTab={setCurrentTab}
             lang={lang}
           />
         )}

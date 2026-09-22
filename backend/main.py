@@ -10,7 +10,9 @@ from app.core.database import engine, Base, SessionLocal
 from app.api.textbooks import router as textbooks_router
 from app.api.papers import router as papers_router
 from app.api.blueprints import router as blueprints_router
+from app.api.uploaded_papers import router as uploaded_papers_router
 from app.models.textbook import Textbook, Chapter
+from app.models.uploaded_paper import UploadedPaper
 from app.core.curriculum_data import CURRICULUM_DATABASE
 
 # Create Database tables
@@ -58,6 +60,7 @@ app.mount("/storage", StaticFiles(directory=str(settings.STORAGE_DIR)), name="st
 app.include_router(textbooks_router, prefix=settings.API_V1_STR)
 app.include_router(papers_router, prefix=settings.API_V1_STR)
 app.include_router(blueprints_router, prefix=settings.API_V1_STR)
+app.include_router(uploaded_papers_router, prefix=settings.API_V1_STR)
 
 @app.get("/health")
 def health_endpoint():
@@ -179,7 +182,52 @@ def seed_initial_data():
     finally:
         db.close()
 
+def seed_uploaded_papers():
+    """
+    Seeds initial sample question papers for Classes 5-10 if available.
+    """
+    db = SessionLocal()
+    try:
+        count = db.query(UploadedPaper).count()
+        if count == 0:
+            print("Pre-seeding existing question papers for Classes 5-10...")
+            src_dir = Path(r"C:/Users/User/Hindi paper")
+            for grade in range(5, 11):
+                grade_str = str(grade)
+                subj = "हिंदी (लोकभारती)" if grade in [9, 10] else "हिंदी (सुलभभारती)"
+                title = f"Class {grade_str} — Hindi Paper"
+                pdf_name = f"class_{grade_str}_paper.pdf"
+                docx_name = f"class_{grade_str}_paper.docx"
+                
+                dest_pdf = settings.UPLOADED_PAPERS_DIR / pdf_name
+                dest_docx = settings.UPLOADED_PAPERS_DIR / docx_name
+                
+                # Check if generated or in source
+                if dest_pdf.exists():
+                    fsize = dest_pdf.stat().st_size
+                    up = UploadedPaper(
+                        title=title,
+                        grade=grade_str,
+                        subject=subj,
+                        original_filename=pdf_name,
+                        file_type="pdf",
+                        file_path=str(dest_pdf),
+                        converted_docx_path=str(dest_docx) if dest_docx.exists() else None,
+                        file_size=fsize,
+                        conversion_status="ready",
+                        conversion_warning="PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
+                    )
+                    db.add(up)
+            db.commit()
+            print("Existing question papers pre-seeded successfully.")
+    except Exception as e:
+        print(f"Uploaded papers seeding note: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
 seed_initial_data()
+seed_uploaded_papers()
 
 if __name__ == "__main__":
     import uvicorn

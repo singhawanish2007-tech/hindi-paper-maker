@@ -46,6 +46,8 @@ backend/storage/exports/*
 !backend/storage/exports/.gitkeep
 backend/storage/textbooks/*
 !backend/storage/textbooks/.gitkeep
+backend/storage/uploaded_papers/*
+!backend/storage/uploaded_papers/.gitkeep
 *.pdf
 
 # Operating system / IDE

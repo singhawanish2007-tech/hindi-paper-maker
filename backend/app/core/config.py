@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     TEXTBOOKS_DIR: Path = STORAGE_DIR / "textbooks"
     EXPORTS_DIR: Path = STORAGE_DIR / "exports"
     ASSETS_DIR: Path = STORAGE_DIR / "assets"
+    UPLOADED_PAPERS_DIR: Path = STORAGE_DIR / "uploaded_papers"
     
     # Database
     DATABASE_URL: str = os.getenv(
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     # File Limits (100 MB)
     MAX_FILE_SIZE: int = 100 * 1024 * 1024
     ALLOWED_EXTENSIONS: list[str] = [".pdf"]
+    ALLOWED_PAPER_EXTENSIONS: list[str] = [".pdf", ".docx", ".doc", ".png", ".jpg", ".jpeg"]
     
     # Mandatory Default Settings
     DEFAULT_SCHOOL_NAME: str = "TRINITY HIGH SCHOOL & JUNIOR COLLEGE"
@@ -49,3 +51,5 @@ settings.STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 settings.TEXTBOOKS_DIR.mkdir(parents=True, exist_ok=True)
 settings.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 settings.ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+settings.UPLOADED_PAPERS_DIR.mkdir(parents=True, exist_ok=True)
+

@@ -124,3 +124,18 @@ export interface AnswerKeyData {
   answers: AnswerKeyItem[];
   notes?: string;
 }
+
+export interface UploadedPaper {
+  id: number;
+  title: string;
+  grade: string;
+  subject: string;
+  original_filename: string;
+  file_type: "pdf" | "docx" | "image";
+  file_size: number;
+  has_pdf: boolean;
+  has_docx: boolean;
+  conversion_status: string;
+  conversion_warning: string;
+  created_at: string;
+}

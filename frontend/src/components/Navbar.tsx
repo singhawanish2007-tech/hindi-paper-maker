@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { BookOpen, FileText, Sparkles, Globe, Menu, X, CheckSquare } from "lucide-react";
+import { BookOpen, FileText, Sparkles, Globe, Menu, X, CheckSquare, UploadCloud } from "lucide-react";
 import { translations, Language } from "../services/translations";
 
 interface NavbarProps {
@@ -85,6 +85,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               {t.uploadTextbook}
+            </button>
+
+            <button
+              onClick={() => handleNavClick("uploaded-papers")}
+              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                currentTab === "uploaded-papers"
+                  ? "bg-blue-50 text-blue-700 font-bold"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+              }`}
+            >
+              {t.uploadExistingPaper}
             </button>
 
             <button
@@ -203,6 +214,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <BookOpen className="w-4 h-4 text-indigo-600" />
             {t.uploadTextbook}
+          </button>
+
+          <button
+            onClick={() => handleNavClick("uploaded-papers")}
+            className={`w-full text-left px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${
+              currentTab === "uploaded-papers"
+                ? "bg-blue-50 text-blue-700 font-bold"
+                : "text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <UploadCloud className="w-4 h-4 text-sky-600" />
+            {t.uploadExistingPaper}
           </button>
 
           <button
