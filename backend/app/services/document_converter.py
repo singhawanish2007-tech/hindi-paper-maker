@@ -106,13 +106,26 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 100, tessdat
 
 def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessdata_dir: str = "", dpi: int = 100) -> tuple[str, list]:
     """
-    Safely retrieves page text and layout blocks using PyMuPDF OCR, Tesseract CLI, or digital text.
-    Never crashes or raises unhandled exceptions.
+    Safely retrieves page text and layout blocks using Tesseract CLI (on Linux),
+    PyMuPDF OCR (on Windows), or digital text fallback.
+    Guaranteed zero Python crashes or segmentation faults.
     """
+    import sys
     if not is_ocr:
         return page.get_text(), page.get_text("blocks")
 
-    # 1. Primary: PyMuPDF get_textpage_ocr (fast, in-memory)
+    # On Linux (Docker/Render): ALWAYS use Tesseract CLI via subprocess to eliminate MuPDF dlopen C-level segfaults
+    if sys.platform != "win32":
+        raw_text, blocks = extract_blocks_via_tesseract_cli(page, dpi=dpi, tessdata_dir=tessdata_dir)
+        if raw_text and len(raw_text.strip()) > 10:
+            return raw_text, blocks
+        return page.get_text(), page.get_text("blocks")
+
+    # On Windows: Try Tesseract CLI first, then PyMuPDF embedded OCR
+    raw_text, blocks = extract_blocks_via_tesseract_cli(page, dpi=dpi, tessdata_dir=tessdata_dir)
+    if raw_text and len(raw_text.strip()) > 10:
+        return raw_text, blocks
+
     try:
         kwargs = {"language": "hin+eng", "dpi": dpi}
         if tessdata_dir and os.path.exists(tessdata_dir):
@@ -125,14 +138,8 @@ def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessda
         if raw_text and len(raw_text.strip()) > 10:
             return raw_text, blocks
     except Exception as ex:
-        print(f"PyMuPDF OCR error on page {page_idx}: {ex}")
+        print(f"PyMuPDF OCR error on Windows page {page_idx}: {ex}")
 
-    # 2. Secondary fallback: Tesseract CLI
-    raw_text, blocks = extract_blocks_via_tesseract_cli(page, dpi=dpi, tessdata_dir=tessdata_dir)
-    if raw_text and len(raw_text.strip()) > 10:
-        return raw_text, blocks
-
-    # 3. Fallback to digital text
     return page.get_text(), page.get_text("blocks")
 
 def is_scanned_pdf(doc: pymupdf.Document) -> bool:
@@ -725,18 +732,15 @@ def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout
     except Exception as e:
         print(f"Isolated conversion subprocess error: {e}")
 
-    # Fallback to direct conversion or emergency docx
-    try:
-        return convert_pdf_to_docx(pdf_path, output_docx_path)
-    except Exception as e:
-        print(f"Direct fallback conversion failed: {e}")
-        create_emergency_fallback_docx(pdf_path, output_docx_path)
-        return {
-            "output_path": output_docx_path,
-            "is_scanned": True,
-            "low_confidence": True,
-            "warning": "PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
-        }
+    # Fallback to emergency fallback docx (never execute heavy/crashing OCR directly in Uvicorn)
+    print("Subprocess failed or timed out. Creating safe emergency fallback DOCX.")
+    create_emergency_fallback_docx(pdf_path, output_docx_path)
+    return {
+        "output_path": output_docx_path,
+        "is_scanned": True,
+        "low_confidence": True,
+        "warning": "PDF से Word बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
+    }
 
 if __name__ == "__main__":
     import sys

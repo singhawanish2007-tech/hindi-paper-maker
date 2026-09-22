@@ -159,16 +159,12 @@ def upload_papers(
             converted_pdf_path=converted_pdf_path,
             preview_html=None,
             file_size=file_size,
-            conversion_status="processing" if file_type in ["pdf", "image"] else "ready",
+            conversion_status="ready",
             conversion_warning="PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
         )
         db.add(paper_record)
         db.commit()
         db.refresh(paper_record)
-
-        # Trigger background conversion immediately
-        if paper_record.file_type in ["pdf", "image"]:
-            background_tasks.add_task(background_convert_paper, paper_record.id)
 
         created_records.append(paper_to_dict(paper_record))
 
