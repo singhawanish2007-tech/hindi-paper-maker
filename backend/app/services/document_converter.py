@@ -71,10 +71,11 @@ def get_tessdata_path() -> Optional[str]:
 def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 100, tessdata_dir: str = "") -> tuple[str, list]:
     """
     Directly invokes tesseract CLI to OCR a page image and extract text blocks.
-    Zero Python dlopen or C-extension crashes.
+    Zero Python dlopen or C-extension crashes. Supports PDF, TXT, and stdout fallbacks.
     """
-    tess_bin = os.getenv("TESSERACT_PATH") or shutil.which("tesseract") or "/usr/bin/tesseract"
+    tess_bin = shutil.which("tesseract") or os.getenv("TESSERACT_PATH") or "/usr/bin/tesseract"
     if not (os.path.exists(tess_bin) or shutil.which(tess_bin)):
+        print(f"Tesseract executable not found at {tess_bin}")
         return "", []
 
     try:
@@ -86,21 +87,62 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 100, tessdat
             gc.collect()
 
             out_base = Path(tmpdir) / "ocr_out"
-            cmd = [tess_bin, str(img_path), str(out_base), "-l", "hin+eng", "--psm", "3"]
+
+            # 1. Primary: Run Tesseract with PDF and TXT output
+            cmd = [tess_bin, str(img_path), str(out_base)]
             if tessdata_dir and os.path.exists(tessdata_dir):
                 cmd.extend(["--tessdata-dir", str(tessdata_dir)])
-            cmd.append("pdf")
+            cmd.extend(["-l", "hin+eng", "pdf", "txt"])
 
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+            if res.returncode != 0:
+                print(f"Tesseract CLI command failed (code {res.returncode}): {res.stderr[:300] if res.stderr else ''}")
+                # Retry with only 'hin' if hin+eng failed
+                cmd_hin = [tess_bin, str(img_path), str(out_base), "-l", "hin", "pdf", "txt"]
+                if tessdata_dir and os.path.exists(tessdata_dir):
+                    cmd_hin.extend(["--tessdata-dir", str(tessdata_dir)])
+                res = subprocess.run(cmd_hin, capture_output=True, text=True, timeout=25)
+
+            # Check generated PDF
             ocr_pdf = Path(tmpdir) / "ocr_out.pdf"
             if ocr_pdf.exists() and ocr_pdf.stat().st_size > 0:
                 doc_ocr = pymupdf.open(str(ocr_pdf))
                 p_text = doc_ocr[0].get_text()
                 p_blocks = doc_ocr[0].get_text("blocks")
                 doc_ocr.close()
-                return p_text, p_blocks
+                if p_text and len(p_text.strip()) > 10:
+                    return p_text, p_blocks
+
+            # Check generated TXT
+            ocr_txt = Path(tmpdir) / "ocr_out.txt"
+            if ocr_txt.exists() and ocr_txt.stat().st_size > 0:
+                with open(ocr_txt, "r", encoding="utf-8", errors="ignore") as f:
+                    p_text = f.read().strip()
+                if p_text and len(p_text) > 10:
+                    lines = [l.strip() for l in p_text.splitlines() if l.strip()]
+                    synthetic_blocks = []
+                    y_pos = 50.0
+                    for line in lines:
+                        synthetic_blocks.append((50.0, y_pos, 500.0, y_pos + 18.0, line, 0, 0))
+                        y_pos += 22.0
+                    return p_text, synthetic_blocks
+
+            # 2. Stdout execution fallback
+            cmd_std = [tess_bin, str(img_path), "stdout", "-l", "hin+eng"]
+            if tessdata_dir and os.path.exists(tessdata_dir):
+                cmd_std.extend(["--tessdata-dir", str(tessdata_dir)])
+            res_std = subprocess.run(cmd_std, capture_output=True, text=True, timeout=20)
+            if res_std.stdout and len(res_std.stdout.strip()) > 10:
+                p_text = res_std.stdout.strip()
+                lines = [l.strip() for l in p_text.splitlines() if l.strip()]
+                synthetic_blocks = []
+                y_pos = 50.0
+                for line in lines:
+                    synthetic_blocks.append((50.0, y_pos, 500.0, y_pos + 18.0, line, 0, 0))
+                    y_pos += 22.0
+                return p_text, synthetic_blocks
     except Exception as e:
-        print(f"Tesseract CLI extraction error: {e}")
+        print(f"Tesseract CLI extraction exception: {e}")
 
     return "", []
 

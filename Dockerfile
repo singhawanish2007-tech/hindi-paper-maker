@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-hin \
     tesseract-ocr-eng \
+    tesseract-ocr-osd \
     libtesseract-dev \
     chromium \
     libnss3 \
@@ -45,6 +46,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && (ln -sf /usr/lib/aarch64-linux-gnu/libtesseract.so.5 /usr/lib/aarch64-linux-gnu/libtesseract.so || true) \
     && ldconfig || true \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy bundled tessdata to system tessdata locations
+RUN mkdir -p /usr/share/tesseract-ocr/5/tessdata /usr/share/tesseract-ocr/tessdata
+COPY backend/tessdata/ /usr/share/tesseract-ocr/5/tessdata/
+COPY backend/tessdata/ /usr/share/tesseract-ocr/tessdata/
 
 ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
 ENV TESSERACT_PATH=/usr/bin/tesseract
