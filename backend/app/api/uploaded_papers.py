@@ -45,9 +45,14 @@ def paper_to_dict(p: UploadedPaper) -> dict:
     }
 
 @router.get("/debug-ocr")
-def debug_ocr():
+def debug_ocr(db: Session = Depends(get_db)):
     import subprocess
     import shutil
+    import sys
+    import pymupdf
+    import pytesseract
+    from PIL import Image
+
     res = {}
     res["tesseract_which"] = shutil.which("tesseract")
     res["tesseract_env"] = os.getenv("TESSERACT_PATH")
@@ -65,21 +70,34 @@ def debug_ocr():
     except Exception as e:
         res["langs_error"] = str(e)
 
-    paths_to_check = [
-        "/usr/share/tesseract-ocr/5/tessdata",
-        "/usr/share/tesseract-ocr/4.00/tessdata",
-        "/usr/share/tesseract-ocr/tessdata",
-        "/usr/share/tessdata",
-        str(settings.BASE_DIR / "tessdata"),
-        str(settings.TESSDATA_DIR)
-    ]
-    res["directory_contents"] = {}
-    for pt in paths_to_check:
-        p_obj = Path(pt)
-        if p_obj.exists():
-            res["directory_contents"][pt] = [f.name for f in p_obj.iterdir()][:15]
-        else:
-            res["directory_contents"][pt] = "DOES_NOT_EXIST"
+    paper = db.query(UploadedPaper).first()
+    if paper and os.path.exists(paper.file_path):
+        doc = pymupdf.open(paper.file_path)
+        page0 = doc[0]
+        pix = page0.get_pixmap(dpi=72)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        try:
+            txt = pytesseract.image_to_string(img, lang="hin")
+            res["pytesseract_test"] = txt[:300]
+        except Exception as e:
+            res["pytesseract_error"] = str(e)
+
+        test_out = settings.UPLOADED_PAPERS_DIR / "debug_test.docx"
+        cmd = [
+            sys.executable,
+            "-m",
+            "app.services.document_converter",
+            str(paper.file_path),
+            str(test_out)
+        ]
+        try:
+            sub = subprocess.run(cmd, capture_output=True, text=True, timeout=40, cwd=str(settings.BASE_DIR))
+            res["sub_returncode"] = sub.returncode
+            res["sub_stdout"] = sub.stdout[:400]
+            res["sub_stderr"] = sub.stderr[:400]
+        except Exception as e:
+            res["sub_error"] = str(e)
+        doc.close()
 
     return res
 
