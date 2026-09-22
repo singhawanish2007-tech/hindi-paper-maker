@@ -230,9 +230,28 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
             docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
             if is_valid_converted_docx(docx_out):
                 paper.converted_docx_path = str(docx_out)
+                paper.conversion_status = "ready"
                 target_path = docx_out
                 db.commit()
-            else:
+            elif paper.conversion_status == "processing":
+                # Background conversion is already actively running
+                # Wait up to 30 seconds for it to finish rather than competing for 0.1 CPU
+                import time
+                waited = 0
+                while waited < 30:
+                    time.sleep(2)
+                    waited += 2
+                    db.refresh(paper)
+                    if is_valid_converted_docx(docx_out):
+                        paper.converted_docx_path = str(docx_out)
+                        paper.conversion_status = "ready"
+                        target_path = docx_out
+                        db.commit()
+                        break
+                    if paper.conversion_status == "ready":
+                        break
+
+            if not target_path or not target_path.exists() or not is_valid_converted_docx(target_path):
                 # Convert on demand
                 src_pdf = Path(paper.file_path)
                 if paper.file_type == "image":
@@ -240,6 +259,9 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
                     convert_images_to_pdf([src_pdf], pdf_out)
                     src_pdf = pdf_out
                     paper.converted_pdf_path = str(pdf_out)
+
+                paper.conversion_status = "processing"
+                db.commit()
 
                 res = convert_pdf_to_docx_isolated(src_pdf, docx_out, timeout=85)
                 if docx_out.exists() and docx_out.stat().st_size > 0:

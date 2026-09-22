@@ -69,10 +69,10 @@ def get_tessdata_path() -> Optional[str]:
 
     return str(target_dir) if target_dir.exists() else None
 
-def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 85, tessdata_dir: str = "") -> tuple[str, list]:
+def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 72, tessdata_dir: str = "") -> tuple[str, list]:
     """
     Directly invokes tesseract CLI to OCR a page image and extract text blocks.
-    Zero Python dlopen or C-extension crashes. Supports PDF, TXT, and stdout fallbacks.
+    Zero Python dlopen or C-extension crashes. Fast text extraction with tessedit_do_invert=0.
     """
     tess_bin = shutil.which("tesseract") or os.getenv("TESSERACT_PATH") or "/usr/bin/tesseract"
     if not (os.path.exists(tess_bin) or shutil.which(tess_bin)):
@@ -89,30 +89,19 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 85, tessdata
 
             out_base = Path(tmpdir) / "ocr_out"
 
-            # 1. Primary: Run Tesseract with PDF and TXT output
+            # Primary: Fast TXT output without redundant color inversion
             cmd = [tess_bin, str(img_path), str(out_base)]
             if tessdata_dir and os.path.exists(tessdata_dir):
                 cmd.extend(["--tessdata-dir", str(tessdata_dir)])
-            cmd.extend(["-l", "hin+eng", "pdf", "txt"])
+            cmd.extend(["-l", "hin+eng", "-c", "tessedit_do_invert=0", "txt"])
 
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
             if res.returncode != 0:
-                print(f"Tesseract CLI command failed (code {res.returncode}): {res.stderr[:300] if res.stderr else ''}")
                 # Retry with only 'hin' if hin+eng failed
-                cmd_hin = [tess_bin, str(img_path), str(out_base), "-l", "hin", "pdf", "txt"]
+                cmd_hin = [tess_bin, str(img_path), str(out_base), "-l", "hin", "-c", "tessedit_do_invert=0", "txt"]
                 if tessdata_dir and os.path.exists(tessdata_dir):
                     cmd_hin.extend(["--tessdata-dir", str(tessdata_dir)])
-                res = subprocess.run(cmd_hin, capture_output=True, text=True, timeout=25)
-
-            # Check generated PDF
-            ocr_pdf = Path(tmpdir) / "ocr_out.pdf"
-            if ocr_pdf.exists() and ocr_pdf.stat().st_size > 0:
-                doc_ocr = pymupdf.open(str(ocr_pdf))
-                p_text = doc_ocr[0].get_text()
-                p_blocks = doc_ocr[0].get_text("blocks")
-                doc_ocr.close()
-                if p_text and len(p_text.strip()) > 10:
-                    return p_text, p_blocks
+                res = subprocess.run(cmd_hin, capture_output=True, text=True, timeout=18)
 
             # Check generated TXT
             ocr_txt = Path(tmpdir) / "ocr_out.txt"
@@ -127,27 +116,12 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 85, tessdata
                         synthetic_blocks.append((50.0, y_pos, 500.0, y_pos + 18.0, line, 0, 0))
                         y_pos += 22.0
                     return p_text, synthetic_blocks
-
-            # 2. Stdout execution fallback
-            cmd_std = [tess_bin, str(img_path), "stdout", "-l", "hin+eng"]
-            if tessdata_dir and os.path.exists(tessdata_dir):
-                cmd_std.extend(["--tessdata-dir", str(tessdata_dir)])
-            res_std = subprocess.run(cmd_std, capture_output=True, text=True, timeout=20)
-            if res_std.stdout and len(res_std.stdout.strip()) > 10:
-                p_text = res_std.stdout.strip()
-                lines = [l.strip() for l in p_text.splitlines() if l.strip()]
-                synthetic_blocks = []
-                y_pos = 50.0
-                for line in lines:
-                    synthetic_blocks.append((50.0, y_pos, 500.0, y_pos + 18.0, line, 0, 0))
-                    y_pos += 22.0
-                return p_text, synthetic_blocks
     except Exception as e:
         print(f"Tesseract CLI extraction exception: {e}")
 
     return "", []
 
-def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 85, tessdata_dir: str = "") -> tuple[str, list]:
+def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 72, tessdata_dir: str = "") -> tuple[str, list]:
     """
     Directly invokes pytesseract to extract text and layout blocks in-memory.
     """
@@ -159,9 +133,10 @@ def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 85, tessdata_d
         if os.path.exists(tess_bin):
             pytesseract.pytesseract.tesseract_cmd = tess_bin
 
-        config = ""
+        config_parts = ["-c tessedit_do_invert=0"]
         if tessdata_dir and os.path.exists(tessdata_dir):
-            config = f'--tessdata-dir "{tessdata_dir}"'
+            config_parts.append(f'--tessdata-dir "{tessdata_dir}"')
+        config = " ".join(config_parts)
 
         pix = page.get_pixmap(dpi=dpi)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -218,7 +193,7 @@ def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 85, tessdata_d
 
     return "", []
 
-def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessdata_dir: str = "", dpi: int = 85) -> tuple[str, list]:
+def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessdata_dir: str = "", dpi: int = 72) -> tuple[str, list]:
     """
     Safely retrieves page text and layout blocks using pytesseract, Tesseract CLI,
     PyMuPDF OCR (on Windows), or digital text fallback.
@@ -311,15 +286,15 @@ def build_editable_docx_from_blocks(doc: pymupdf.Document, output_docx_path: Pat
         if page_idx > 0:
             wdoc.add_page_break()
 
-        # Time budget: If already spent >75s on Render, switch to non-OCR for remaining pages
-        use_ocr_for_page = is_ocr and (time.time() - start_time < 75)
+        # Time budget: If already spent >55s on Render, switch to non-OCR for remaining pages
+        use_ocr_for_page = is_ocr and (time.time() - start_time < 55)
 
         raw_page_text, blocks = get_page_blocks_safe(
             page=page,
             page_idx=page_idx,
             is_ocr=use_ocr_for_page,
             tessdata_dir=tessdata_dir,
-            dpi=85
+            dpi=72
         )
 
         page_chars = len(raw_page_text.strip())
