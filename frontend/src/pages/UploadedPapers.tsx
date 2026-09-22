@@ -10,7 +10,8 @@ import {
   X,
   FileCheck,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  Loader2
 } from "lucide-react";
 import { UploadedPaper } from "../types";
 import { uploadedPaperService } from "../services/api";
@@ -32,6 +33,8 @@ export const UploadedPapers: React.FC<UploadedPapersProps> = ({
   const [selectedGrade, setSelectedGrade] = useState<string>("");
   const [previewPaper, setPreviewPaper] = useState<UploadedPaper | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("");
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [downloadingType, setDownloadingType] = useState<"pdf" | "docx" | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const t = translations[lang] || translations.hi;
@@ -52,10 +55,10 @@ export const UploadedPapers: React.FC<UploadedPapersProps> = ({
     loadPapers();
   }, []);
 
-  const handleFilesSelect = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const fileArray = Array.from(files);
+  const handleFilesSelect = async (selectedFiles: FileList | null) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
 
+    const fileArray = Array.from(selectedFiles);
     try {
       setUploading(true);
       setUploadProgress(10);
@@ -100,19 +103,29 @@ export const UploadedPapers: React.FC<UploadedPapersProps> = ({
 
   const handleDownloadPdf = async (paper: UploadedPaper) => {
     try {
+      setDownloadingId(paper.id);
+      setDownloadingType("pdf");
       const cleanName = `${paper.title.replace("—", "-").trim()}.pdf`;
       await uploadedPaperService.downloadPdf(paper.id, cleanName);
-    } catch (err) {
-      alert("PDF डाउनलोड में त्रुटि: " + err);
+    } catch (err: any) {
+      alert("PDF डाउनलोड में त्रुटि: " + (err?.message || err));
+    } finally {
+      setDownloadingId(null);
+      setDownloadingType(null);
     }
   };
 
   const handleDownloadWord = async (paper: UploadedPaper) => {
     try {
+      setDownloadingId(paper.id);
+      setDownloadingType("docx");
       const cleanName = `${paper.title.replace("—", "-").trim()}.docx`;
       await uploadedPaperService.downloadDocx(paper.id, cleanName);
-    } catch (err) {
-      alert("Word डाउनलोड में त्रुटि: " + err);
+    } catch (err: any) {
+      alert("Word डाउनलोड में त्रुटि: " + (err?.message || err));
+    } finally {
+      setDownloadingId(null);
+      setDownloadingType(null);
     }
   };
 
@@ -348,21 +361,41 @@ export const UploadedPapers: React.FC<UploadedPapersProps> = ({
                   {/* [Download Original PDF] */}
                   <button
                     onClick={() => handleDownloadPdf(paper)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                    disabled={downloadingId === paper.id}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
                     title="मूल PDF डाउनलोड करें"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>{t.downloadPaperPdf}</span>
+                    {downloadingId === paper.id && downloadingType === "pdf" ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{lang === "hi" ? "डाउनलोड हो रहा है..." : "Downloading..."}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>{t.downloadPaperPdf}</span>
+                      </>
+                    )}
                   </button>
 
                   {/* [Download Editable Word] */}
                   <button
                     onClick={() => handleDownloadWord(paper)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                    disabled={downloadingId === paper.id}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
                     title="संपादन योग्य Word (.docx) फ़ाइल डाउनलोड करें"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>{t.downloadPaperWord}</span>
+                    {downloadingId === paper.id && downloadingType === "docx" ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{lang === "hi" ? "Word तैयार हो रहा है..." : "Preparing Word..."}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>{t.downloadPaperWord}</span>
+                      </>
+                    )}
                   </button>
 
                   {/* [Delete] */}
@@ -401,20 +434,40 @@ export const UploadedPapers: React.FC<UploadedPapersProps> = ({
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={() => handleDownloadPdf(previewPaper)}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                  disabled={downloadingId === previewPaper.id}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{t.downloadPaperPdf}</span>
-                  <span className="sm:hidden">Original PDF</span>
+                  {downloadingId === previewPaper.id && downloadingType === "pdf" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span className="hidden sm:inline">{lang === "hi" ? "डाउनलोड हो रहा है..." : "Downloading..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">{t.downloadPaperPdf}</span>
+                      <span className="sm:hidden">Original PDF</span>
+                    </>
+                  )}
                 </button>
 
                 <button
                   onClick={() => handleDownloadWord(previewPaper)}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                  disabled={downloadingId === previewPaper.id}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{t.downloadPaperWord}</span>
-                  <span className="sm:hidden">Editable Word</span>
+                  {downloadingId === previewPaper.id && downloadingType === "docx" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span className="hidden sm:inline">{lang === "hi" ? "Word तैयार हो रहा है..." : "Preparing Word..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">{t.downloadPaperWord}</span>
+                      <span className="sm:hidden">Editable Word</span>
+                    </>
+                  )}
                 </button>
 
                 <button

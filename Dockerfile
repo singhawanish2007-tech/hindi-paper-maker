@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-hin \
     tesseract-ocr-eng \
+    libtesseract-dev \
     chromium \
     libnss3 \
     libatk1.0-0 \
@@ -40,8 +41,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libasound2 \
     libglib2.0-0 \
+    && (ln -sf /usr/lib/x86_64-linux-gnu/libtesseract.so.5 /usr/lib/x86_64-linux-gnu/libtesseract.so || true) \
+    && (ln -sf /usr/lib/aarch64-linux-gnu/libtesseract.so.5 /usr/lib/aarch64-linux-gnu/libtesseract.so || true) \
+    && ldconfig || true \
     && rm -rf /var/lib/apt/lists/*
 
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
+ENV TESSERACT_PATH=/usr/bin/tesseract
 ENV CHROME_BIN=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

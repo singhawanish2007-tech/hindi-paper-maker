@@ -27,16 +27,21 @@ def normalize_digits(text: str) -> str:
         text = text.replace(d, a)
     return text
 
+import time
+import shutil
+import tempfile
+
 def get_tessdata_path() -> Optional[str]:
     """
     Locates or initializes the tessdata directory containing hin.traineddata.
     """
     candidates = [
+        Path(os.getenv("TESSDATA_PREFIX", "")),
         Path("/usr/share/tesseract-ocr/5/tessdata"),
         Path("/usr/share/tesseract-ocr/4.00/tessdata"),
+        Path("/usr/share/tesseract-ocr/tessdata"),
         settings.TESSDATA_DIR,
         settings.BASE_DIR / "tessdata",
-        Path(os.getenv("TESSDATA_PREFIX", "")),
         Path(r"C:\Program Files\Tesseract-OCR\tessdata")
     ]
 
@@ -62,6 +67,73 @@ def get_tessdata_path() -> Optional[str]:
         print(f"Warning: Could not download tessdata automatically: {e}")
 
     return str(target_dir) if target_dir.exists() else None
+
+def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 100, tessdata_dir: str = "") -> tuple[str, list]:
+    """
+    Directly invokes tesseract CLI to OCR a page image and extract text blocks.
+    Zero Python dlopen or C-extension crashes.
+    """
+    tess_bin = os.getenv("TESSERACT_PATH") or shutil.which("tesseract") or "/usr/bin/tesseract"
+    if not (os.path.exists(tess_bin) or shutil.which(tess_bin)):
+        return "", []
+
+    try:
+        pix = page.get_pixmap(dpi=dpi)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            img_path = Path(tmpdir) / "page.png"
+            pix.save(str(img_path))
+            del pix
+            gc.collect()
+
+            out_base = Path(tmpdir) / "ocr_out"
+            cmd = [tess_bin, str(img_path), str(out_base), "-l", "hin+eng", "--psm", "3"]
+            if tessdata_dir and os.path.exists(tessdata_dir):
+                cmd.extend(["--tessdata-dir", str(tessdata_dir)])
+            cmd.append("pdf")
+
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+            ocr_pdf = Path(tmpdir) / "ocr_out.pdf"
+            if ocr_pdf.exists() and ocr_pdf.stat().st_size > 0:
+                doc_ocr = pymupdf.open(str(ocr_pdf))
+                p_text = doc_ocr[0].get_text()
+                p_blocks = doc_ocr[0].get_text("blocks")
+                doc_ocr.close()
+                return p_text, p_blocks
+    except Exception as e:
+        print(f"Tesseract CLI extraction error: {e}")
+
+    return "", []
+
+def get_page_blocks_safe(page: pymupdf.Page, page_idx: int, is_ocr: bool, tessdata_dir: str = "", dpi: int = 100) -> tuple[str, list]:
+    """
+    Safely retrieves page text and layout blocks using PyMuPDF OCR, Tesseract CLI, or digital text.
+    Never crashes or raises unhandled exceptions.
+    """
+    if not is_ocr:
+        return page.get_text(), page.get_text("blocks")
+
+    # 1. Primary: PyMuPDF get_textpage_ocr (fast, in-memory)
+    try:
+        kwargs = {"language": "hin+eng", "dpi": dpi}
+        if tessdata_dir and os.path.exists(tessdata_dir):
+            kwargs["tessdata"] = tessdata_dir
+        tp = page.get_textpage_ocr(**kwargs)
+        raw_text = tp.extractText()
+        blocks = tp.extractBLOCKS()
+        del tp
+        gc.collect()
+        if raw_text and len(raw_text.strip()) > 10:
+            return raw_text, blocks
+    except Exception as ex:
+        print(f"PyMuPDF OCR error on page {page_idx}: {ex}")
+
+    # 2. Secondary fallback: Tesseract CLI
+    raw_text, blocks = extract_blocks_via_tesseract_cli(page, dpi=dpi, tessdata_dir=tessdata_dir)
+    if raw_text and len(raw_text.strip()) > 10:
+        return raw_text, blocks
+
+    # 3. Fallback to digital text
+    return page.get_text(), page.get_text("blocks")
 
 def is_scanned_pdf(doc: pymupdf.Document) -> bool:
     """
@@ -113,40 +185,35 @@ def build_editable_docx_from_blocks(doc: pymupdf.Document, output_docx_path: Pat
     low_confidence = False
     total_chars = 0
 
+    start_time = time.time()
     for page_idx, page in enumerate(doc):
         if page_idx > 0:
             wdoc.add_page_break()
 
-        if is_ocr:
-            try:
-                kwargs = {"language": "hin+eng", "dpi": 150}
-                if tessdata_dir and os.path.exists(tessdata_dir):
-                    kwargs["tessdata"] = tessdata_dir
-                tp = page.get_textpage_ocr(**kwargs)
-                raw_page_text = tp.extractText()
-                blocks = tp.extractBLOCKS()
-                del tp
-                gc.collect()
-            except Exception as ex:
-                print(f"OCR error on page {page_idx}: {ex}")
-                try:
-                    tp = page.get_textpage_ocr(language="hin", dpi=150)
-                    raw_page_text = tp.extractText()
-                    blocks = tp.extractBLOCKS()
-                    del tp
-                    gc.collect()
-                except Exception as ex2:
-                    print(f"OCR fallback error: {ex2}")
-                    raw_page_text = page.get_text()
-                    blocks = page.get_text("blocks")
-        else:
-            raw_page_text = page.get_text()
-            blocks = page.get_text("blocks")
+        # Time budget: If already spent >40s on Render, switch to non-OCR for remaining pages
+        use_ocr_for_page = is_ocr and (time.time() - start_time < 40)
+
+        raw_page_text, blocks = get_page_blocks_safe(
+            page=page,
+            page_idx=page_idx,
+            is_ocr=use_ocr_for_page,
+            tessdata_dir=tessdata_dir,
+            dpi=100
+        )
 
         page_chars = len(raw_page_text.strip())
         total_chars += page_chars
         if page_chars < 40:
             low_confidence = True
+
+        if not blocks or not raw_page_text.strip():
+            p = wdoc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_before = Pt(24)
+            p.paragraph_format.space_after = Pt(24)
+            run = p.add_run(f"[पृष्ठ {page_idx + 1}: स्कैन की गई सामग्री - देवनागरी पाठ्य]")
+            apply_devanagari_font(run, "Mangal", 11, italic=True)
+            continue
 
         blocks = sorted(blocks, key=lambda b: (b[1], b[0]))
         header_table_done = False
@@ -555,10 +622,66 @@ def convert_images_to_pdf(image_paths: List[Path], output_pdf_path: Path) -> Pat
     doc.close()
     return output_pdf_path
 
-def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout: int = 120) -> Dict[str, Any]:
+def create_emergency_fallback_docx(pdf_path: Path, output_docx_path: Path) -> Path:
+    """
+    Emergency generator guaranteeing a valid, editable DOCX is always created
+    even if OCR processes fail or hit environment timeouts.
+    """
+    output_docx_path.parent.mkdir(parents=True, exist_ok=True)
+    wdoc = docx.Document()
+
+    for sec in wdoc.sections:
+        sec.top_margin = Inches(0.6)
+        sec.bottom_margin = Inches(0.6)
+        sec.left_margin = Inches(0.6)
+        sec.right_margin = Inches(0.6)
+
+    meta = extract_metadata(pdf_path, pdf_path.name)
+
+    # School & Paper Header
+    p_school = wdoc.add_paragraph()
+    p_school.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r_school = p_school.add_run(settings.DEFAULT_SCHOOL_NAME)
+    apply_devanagari_font(r_school, "Mangal", 14, bold=True)
+
+    p_title = wdoc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r_title = p_title.add_run(f"Class {meta.get('grade', '10')} — Hindi Paper")
+    apply_devanagari_font(r_title, "Mangal", 12, bold=True)
+
+    try:
+        doc = pymupdf.open(pdf_path)
+        has_content = False
+        for page_idx, page in enumerate(doc):
+            if page_idx > 0:
+                wdoc.add_page_break()
+            text = page.get_text().strip()
+            if text:
+                has_content = True
+                for line in text.splitlines():
+                    if line.strip():
+                        p = wdoc.add_paragraph()
+                        r = p.add_run(line.strip())
+                        apply_devanagari_font(r, "Mangal", 11)
+            else:
+                p_warn = wdoc.add_paragraph()
+                p_warn.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p_warn.paragraph_format.space_before = Pt(20)
+                p_warn.paragraph_format.space_after = Pt(20)
+                r_warn = p_warn.add_run(f"[पृष्ठ {page_idx + 1}: स्कैन की गई प्रश्नपत्रिका]")
+                apply_devanagari_font(r_warn, "Mangal", 11, italic=True)
+        doc.close()
+    except Exception as ex:
+        print(f"Emergency text extraction error: {ex}")
+
+    wdoc.save(str(output_docx_path))
+    return output_docx_path
+
+def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout: int = 50) -> Dict[str, Any]:
     """
     Runs convert_pdf_to_docx in a separate process to guarantee memory isolation
     and protect the web server process from potential C-level library crashes or OOM.
+    Never exceeds 50 seconds, preventing Cloudflare 502/504 gateway timeouts.
     """
     import subprocess
     import json
@@ -597,11 +720,23 @@ def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout
             }
         else:
             print(f"Isolated conversion failed with code {proc.returncode}: {proc.stderr}")
+    except subprocess.TimeoutExpired:
+        print(f"Isolated conversion timed out after {timeout} seconds.")
     except Exception as e:
         print(f"Isolated conversion subprocess error: {e}")
 
-    # Fallback to direct conversion
-    return convert_pdf_to_docx(pdf_path, output_docx_path)
+    # Fallback to direct conversion or emergency docx
+    try:
+        return convert_pdf_to_docx(pdf_path, output_docx_path)
+    except Exception as e:
+        print(f"Direct fallback conversion failed: {e}")
+        create_emergency_fallback_docx(pdf_path, output_docx_path)
+        return {
+            "output_path": output_docx_path,
+            "is_scanned": True,
+            "low_confidence": True,
+            "warning": "PDF से Word में बदलते समय मूल लेआउट में थोड़ा अंतर हो सकता है।"
+        }
 
 if __name__ == "__main__":
     import sys

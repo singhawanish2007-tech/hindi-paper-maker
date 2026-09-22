@@ -12,7 +12,8 @@ import {
   ArrowRight,
   UploadCloud,
   Eye,
-  X
+  X,
+  Loader2
 } from "lucide-react";
 import { Textbook, PaperSummary, UploadedPaper } from "../types";
 import { textbookService, paperService, uploadedPaperService } from "../services/api";
@@ -34,6 +35,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [uploadedPapers, setUploadedPapers] = useState<UploadedPaper[]>([]);
   const [previewPaper, setPreviewPaper] = useState<UploadedPaper | null>(null);
   const [loading, setLoading] = useState(true);
+  const [downloadingUpId, setDownloadingUpId] = useState<number | null>(null);
+  const [downloadingUpType, setDownloadingUpType] = useState<"pdf" | "docx" | null>(null);
 
   const t = translations[lang] || translations.hi;
 
@@ -318,26 +321,64 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                   <button
                     onClick={async () => {
-                      const name = `${up.title.replace("—", "-").trim()}.pdf`;
-                      await uploadedPaperService.downloadPdf(up.id, name);
+                      try {
+                        setDownloadingUpId(up.id);
+                        setDownloadingUpType("pdf");
+                        const name = `${up.title.replace("—", "-").trim()}.pdf`;
+                        await uploadedPaperService.downloadPdf(up.id, name);
+                      } catch (e: any) {
+                        alert("PDF डाउनलोड में त्रुटि: " + (e?.message || e));
+                      } finally {
+                        setDownloadingUpId(null);
+                        setDownloadingUpType(null);
+                      }
                     }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                    disabled={downloadingUpId === up.id}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
                     title="मूल PDF डाउनलोड करें"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>{t.downloadPaperPdf}</span>
+                    {downloadingUpId === up.id && downloadingUpType === "pdf" ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{lang === "hi" ? "डाउनलोड हो रहा है..." : "Downloading..."}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>{t.downloadPaperPdf}</span>
+                      </>
+                    )}
                   </button>
 
                   <button
                     onClick={async () => {
-                      const name = `${up.title.replace("—", "-").trim()}.docx`;
-                      await uploadedPaperService.downloadDocx(up.id, name);
+                      try {
+                        setDownloadingUpId(up.id);
+                        setDownloadingUpType("docx");
+                        const name = `${up.title.replace("—", "-").trim()}.docx`;
+                        await uploadedPaperService.downloadDocx(up.id, name);
+                      } catch (e: any) {
+                        alert("Word डाउनलोड में त्रुटि: " + (e?.message || e));
+                      } finally {
+                        setDownloadingUpId(null);
+                        setDownloadingUpType(null);
+                      }
                     }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                    disabled={downloadingUpId === up.id}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
                     title="संपादन योग्य Word (.docx) फ़ाइल डाउनलोड करें"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>{t.downloadPaperWord}</span>
+                    {downloadingUpId === up.id && downloadingUpType === "docx" ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{lang === "hi" ? "Word तैयार हो रहा है..." : "Preparing Word..."}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>{t.downloadPaperWord}</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
