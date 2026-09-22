@@ -74,17 +74,17 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 72, tessdata
 
             out_base = Path(tmpdir) / "ocr_out"
 
-            # Primary: Fast TXT output without redundant color inversion
+            # Primary: Fast single 'hin' language model without redundant inversion (2x faster on 0.1 CPU)
             cmd = [tess_bin, str(img_path), str(out_base)]
             if tessdata_dir and os.path.exists(tessdata_dir) and tessdata_dir not in ["/usr/share/tesseract-ocr/5/tessdata", "/usr/share/tesseract-ocr/tessdata"]:
                 cmd.extend(["--tessdata-dir", tessdata_dir.strip('"\'')])
-            cmd.extend(["-l", "hin+eng", "-c", "tessedit_do_invert=0", "txt"])
+            cmd.extend(["-l", "hin", "-c", "tessedit_do_invert=0", "txt"])
 
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
             if res.returncode != 0:
-                # Retry with only 'hin' if hin+eng failed
-                cmd_hin = [tess_bin, str(img_path), str(out_base), "-l", "hin", "-c", "tessedit_do_invert=0", "txt"]
-                res = subprocess.run(cmd_hin, capture_output=True, text=True, timeout=18)
+                # Retry with hin+eng if pure hin failed
+                cmd_combo = [tess_bin, str(img_path), str(out_base), "-l", "hin+eng", "-c", "tessedit_do_invert=0", "txt"]
+                res = subprocess.run(cmd_combo, capture_output=True, text=True, timeout=25)
 
             # Check generated TXT
             ocr_txt = Path(tmpdir) / "ocr_out.txt"
