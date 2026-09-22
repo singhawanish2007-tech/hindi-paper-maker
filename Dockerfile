@@ -1,4 +1,4 @@
-﻿# ==========================================
+# ==========================================
 # Multi-Stage Dockerfile for HINDI PAPER MAKER
 # ==========================================
 
@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libgbm1 \
     libasound2 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CHROME_BIN=/usr/bin/chromium
@@ -61,7 +62,7 @@ COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 WORKDIR /app/backend
 
 # Create storage directories
-RUN mkdir -p storage/textbooks storage/exports storage/assets
+RUN mkdir -p storage/textbooks storage/exports storage/assets storage/uploaded_papers
 
 EXPOSE 8000
 
