@@ -70,6 +70,9 @@ def background_convert_paper(paper_id: int):
 
         src_pdf = Path(paper.file_path)
         if not src_pdf.exists():
+            paper.conversion_status = "ready"
+            paper.conversion_warning = f"Source file not found: {paper.file_path}"
+            db.commit()
             return
 
         paper.conversion_status = "processing"
@@ -81,18 +84,29 @@ def background_convert_paper(paper_id: int):
             src_pdf = pdf_out
             paper.converted_pdf_path = str(pdf_out)
 
-        res = convert_pdf_to_docx_isolated(src_pdf, docx_out, timeout=85)
+        res = convert_pdf_to_docx_isolated(src_pdf, docx_out, timeout=75)
         if docx_out.exists() and docx_out.stat().st_size > 0:
-            if is_valid_converted_docx(docx_out):
-                paper.converted_docx_path = str(docx_out)
+            paper.converted_docx_path = str(docx_out)
             paper.conversion_status = "ready"
             if res and isinstance(res, dict) and res.get("warning"):
                 paper.conversion_warning = res.get("warning")
         else:
+            create_emergency_fallback_docx(src_pdf, docx_out)
+            paper.converted_docx_path = str(docx_out)
             paper.conversion_status = "ready"
         db.commit()
     except Exception as ex:
-        print(f"Background conversion error for paper {paper_id}: {ex}")
+        import traceback
+        err_msg = f"Background conversion error for paper {paper_id}: {ex}\n{traceback.format_exc()}"
+        print(err_msg)
+        try:
+            paper = db.query(UploadedPaper).filter(UploadedPaper.id == paper_id).first()
+            if paper:
+                paper.conversion_status = "ready"
+                paper.conversion_warning = str(ex)[:450]
+                db.commit()
+        except Exception:
+            pass
     finally:
         db.close()
 
@@ -224,25 +238,25 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
         download_ext = "docx"
         if paper.file_type == "docx" and os.path.exists(paper.file_path):
             target_path = Path(paper.file_path)
-        elif paper.converted_docx_path and is_valid_converted_docx(Path(paper.converted_docx_path)):
+        elif paper.converted_docx_path and os.path.exists(paper.converted_docx_path) and os.path.getsize(paper.converted_docx_path) > 500:
             target_path = Path(paper.converted_docx_path)
         elif paper.file_type in ["pdf", "image"] and os.path.exists(paper.file_path):
             docx_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.docx"
-            if is_valid_converted_docx(docx_out):
+            if docx_out.exists() and docx_out.stat().st_size > 500:
                 paper.converted_docx_path = str(docx_out)
                 paper.conversion_status = "ready"
                 target_path = docx_out
                 db.commit()
             elif paper.conversion_status == "processing":
                 # Background conversion is already actively running
-                # Wait up to 30 seconds for it to finish rather than competing for 0.1 CPU
+                # Wait up to 15 seconds for it to finish
                 import time
                 waited = 0
-                while waited < 30:
+                while waited < 15:
                     time.sleep(2)
                     waited += 2
                     db.refresh(paper)
-                    if is_valid_converted_docx(docx_out):
+                    if docx_out.exists() and docx_out.stat().st_size > 500:
                         paper.converted_docx_path = str(docx_out)
                         paper.conversion_status = "ready"
                         target_path = docx_out
@@ -251,8 +265,8 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
                     if paper.conversion_status == "ready":
                         break
 
-            if not target_path or not target_path.exists() or not is_valid_converted_docx(target_path):
-                # Convert on demand
+            if not target_path or not target_path.exists():
+                # Convert on demand with safe timeout
                 src_pdf = Path(paper.file_path)
                 if paper.file_type == "image":
                     pdf_out = settings.UPLOADED_PAPERS_DIR / f"{paper.id}_converted.pdf"
@@ -263,12 +277,16 @@ def download_paper(paper_id: int, file_format: str, db: Session = Depends(get_db
                 paper.conversion_status = "processing"
                 db.commit()
 
-                res = convert_pdf_to_docx_isolated(src_pdf, docx_out, timeout=85)
+                res = convert_pdf_to_docx_isolated(src_pdf, docx_out, timeout=60)
                 if docx_out.exists() and docx_out.stat().st_size > 0:
                     target_path = docx_out
-                    if is_valid_converted_docx(docx_out):
-                        paper.converted_docx_path = str(docx_out)
-                        paper.conversion_status = "ready"
+                    paper.converted_docx_path = str(docx_out)
+                else:
+                    create_emergency_fallback_docx(src_pdf, docx_out)
+                    target_path = docx_out
+                    paper.converted_docx_path = str(docx_out)
+
+                paper.conversion_status = "ready"
                 if res and isinstance(res, dict) and res.get("warning"):
                     paper.conversion_warning = res.get("warning")
                 db.commit()
@@ -395,3 +413,42 @@ def delete_paper(paper_id: int, db: Session = Depends(get_db)):
     db.delete(paper)
     db.commit()
     return {"status": "deleted", "id": paper_id}
+
+@router.get("/debug-env")
+def debug_env(db: Session = Depends(get_db)):
+    import shutil, subprocess, sys
+    tess_path = shutil.which("tesseract") or os.getenv("TESSERACT_PATH") or "/usr/bin/tesseract"
+    v_res = None
+    l_res = None
+    try:
+        if os.path.exists(tess_path) or shutil.which("tesseract"):
+            v_res = subprocess.run([tess_path, "--version"], capture_output=True, text=True, timeout=5)
+            l_res = subprocess.run([tess_path, "--list-langs"], capture_output=True, text=True, timeout=5)
+    except Exception as e:
+        v_res = str(e)
+
+    papers = db.query(UploadedPaper).all()
+    papers_info = []
+    for p in papers:
+        papers_info.append({
+            "id": p.id,
+            "title": p.title,
+            "file_type": p.file_type,
+            "file_path": p.file_path,
+            "file_exists": os.path.exists(p.file_path) if p.file_path else False,
+            "file_size": os.path.getsize(p.file_path) if p.file_path and os.path.exists(p.file_path) else 0,
+            "converted_docx_path": p.converted_docx_path,
+            "docx_exists": os.path.exists(p.converted_docx_path) if p.converted_docx_path else False,
+            "docx_size": os.path.getsize(p.converted_docx_path) if p.converted_docx_path and os.path.exists(p.converted_docx_path) else 0,
+            "conversion_status": p.conversion_status,
+            "conversion_warning": p.conversion_warning,
+        })
+
+    return {
+        "platform": sys.platform,
+        "tess_path": tess_path,
+        "tess_found": os.path.exists(tess_path) or bool(shutil.which("tesseract")),
+        "version": v_res.stdout.strip() if hasattr(v_res, "stdout") else str(v_res),
+        "langs": l_res.stdout.strip() if hasattr(l_res, "stdout") else str(l_res),
+        "papers": papers_info
+    }

@@ -74,17 +74,20 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 72, tessdata
 
             out_base = Path(tmpdir) / "ocr_out"
 
-            # Primary: Fast single 'hin' language model without redundant inversion (2x faster on 0.1 CPU)
+            # Primary: Fast single 'hin' language model with OMP_THREAD_LIMIT=1 to avoid CPU contention
             cmd = [tess_bin, str(img_path), str(out_base)]
             if tessdata_dir and os.path.exists(tessdata_dir) and tessdata_dir not in ["/usr/share/tesseract-ocr/5/tessdata", "/usr/share/tesseract-ocr/tessdata"]:
                 cmd.extend(["--tessdata-dir", tessdata_dir.strip('"\'')])
             cmd.extend(["-l", "hin", "-c", "tessedit_do_invert=0", "txt"])
 
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+            tess_env = dict(os.environ)
+            tess_env["OMP_THREAD_LIMIT"] = "1"
+
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=35, env=tess_env)
             if res.returncode != 0:
                 # Retry with hin+eng if pure hin failed
                 cmd_combo = [tess_bin, str(img_path), str(out_base), "-l", "hin+eng", "-c", "tessedit_do_invert=0", "txt"]
-                res = subprocess.run(cmd_combo, capture_output=True, text=True, timeout=25)
+                res = subprocess.run(cmd_combo, capture_output=True, text=True, timeout=35, env=tess_env)
 
             # Check generated TXT
             ocr_txt = Path(tmpdir) / "ocr_out.txt"
@@ -106,7 +109,7 @@ def extract_blocks_via_tesseract_cli(page: pymupdf.Page, dpi: int = 72, tessdata
 
 def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 72, tessdata_dir: str = "") -> tuple[str, list]:
     """
-    Directly invokes pytesseract to extract text and layout blocks in-memory.
+    Directly invokes pytesseract to extract text in-memory with strict timeout.
     """
     try:
         import pytesseract
@@ -127,65 +130,16 @@ def extract_blocks_via_pytesseract(page: pymupdf.Page, dpi: int = 72, tessdata_d
         del pix
         gc.collect()
 
-        data = None
-        try:
-            data = pytesseract.image_to_data(img, lang="hin+eng", config=config, output_type=pytesseract.Output.DICT)
-        except Exception:
-            try:
-                data = pytesseract.image_to_data(img, lang="hin", config=config, output_type=pytesseract.Output.DICT)
-            except Exception:
-                # Direct string fallback (proven to work on Render)
-                txt = pytesseract.image_to_string(img, lang="hin")
-                if txt and len(txt.strip()) > 10:
-                    lines = [clean_ocr_line(l) for l in txt.splitlines() if clean_ocr_line(l)]
-                    synthetic_blocks = []
-                    y_pos = 50.0
-                    for line in lines:
-                        synthetic_blocks.append((50.0, y_pos, 500.0, y_pos + 18.0, line, 0, 0))
-                        y_pos += 22.0
-                    return txt, synthetic_blocks
-                return "", []
-
-        lines_dict = {}
-        n_boxes = len(data["text"])
-        all_words = []
-        for i in range(n_boxes):
-            text = data["text"][i].strip()
-            if not text:
-                continue
-            all_words.append(text)
-            b_num = data["block_num"][i]
-            l_num = data["line_num"][i]
-            key = (b_num, l_num)
-            left = data["left"][i]
-            top = data["top"][i]
-            width = data["width"][i]
-            height = data["height"][i]
-
-            if key not in lines_dict:
-                lines_dict[key] = {
-                    "words": [text],
-                    "x0": left,
-                    "y0": top,
-                    "x1": left + width,
-                    "y1": top + height
-                }
-            else:
-                lines_dict[key]["words"].append(text)
-                lines_dict[key]["x0"] = min(lines_dict[key]["x0"], left)
-                lines_dict[key]["y0"] = min(lines_dict[key]["y0"], top)
-                lines_dict[key]["x1"] = max(lines_dict[key]["x1"], left + width)
-                lines_dict[key]["y1"] = max(lines_dict[key]["y1"], top + height)
-
-        raw_text = " ".join(all_words)
-        blocks = []
-        for k, v in sorted(lines_dict.items(), key=lambda item: (item[1]["y0"], item[1]["x0"])):
-            line_str = " ".join(v["words"]).strip()
-            if line_str:
-                blocks.append((v["x0"], v["y0"], v["x1"], v["y1"], line_str, 0, 0))
-
-        if raw_text and len(raw_text.strip()) > 10:
-            return raw_text, blocks
+        # Fast direct string extraction with timeout
+        txt = pytesseract.image_to_string(img, lang="hin", config=config, timeout=25)
+        if txt and len(txt.strip()) > 10:
+            lines = [clean_ocr_line(l) for l in txt.splitlines() if clean_ocr_line(l)]
+            synthetic_blocks = []
+            y_pos = 50.0
+            for line in lines:
+                synthetic_blocks.append((50.0, y_pos, 500.0, y_pos + 18.0, line, 0, 0))
+                y_pos += 22.0
+            return txt, synthetic_blocks
     except Exception as e:
         print(f"pytesseract extraction error: {e}")
 
@@ -802,16 +756,25 @@ def convert_pdf_to_docx_isolated(pdf_path: Path, output_docx_path: Path, timeout
     """
     import concurrent.futures
 
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(convert_pdf_to_docx, pdf_path, output_docx_path)
-            res = future.result(timeout=timeout)
-            if output_docx_path.exists() and output_docx_path.stat().st_size > 0:
-                return res
+        future = executor.submit(convert_pdf_to_docx, pdf_path, output_docx_path)
+        res = future.result(timeout=timeout)
+        executor.shutdown(wait=False)
+        if output_docx_path.exists() and output_docx_path.stat().st_size > 0:
+            return res
     except concurrent.futures.TimeoutError:
         print(f"Isolated conversion timed out after {timeout} seconds.")
+        try:
+            executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
     except Exception as e:
         print(f"Isolated conversion error: {e}")
+        try:
+            executor.shutdown(wait=False)
+        except Exception:
+            pass
 
     # Fallback to emergency fallback docx
     print("Conversion failed or timed out. Creating safe emergency fallback DOCX.")
